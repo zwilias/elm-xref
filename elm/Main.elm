@@ -103,15 +103,15 @@ add mod model =
                 |> checkTodo (Set.singleton package.name)
 
         Own modul ->
-            let
-                blockers =
-                    requiredModules modul model
-            in
-            if Set.isEmpty blockers then
-                { model | done = Dict.insert modul.name modul model.done }
-                    |> checkTodo (Set.singleton modul.name)
-            else
-                { model | todo = { blockedBy = blockers, data = modul } :: model.todo }
+            { model | todo = todoItem modul model :: model.todo }
+                |> checkTodo Set.empty
+
+
+todoItem : Module -> Model -> { blockedBy : Set Syntax.ModuleName, data : Module }
+todoItem modul model =
+    { blockedBy = requiredModules modul model
+    , data = modul
+    }
 
 
 checkTodo : Set Syntax.ModuleName -> Model -> Model
@@ -125,7 +125,7 @@ checkTodo nowDone model =
                             Set.diff blockedBy nowDone
                     in
                     if Set.isEmpty newBlockers then
-                        ( data :: done, todo )
+                        ( finalize model data :: done, todo )
                     else
                         ( done, { blockedBy = newBlockers, data = data } :: todo )
                 )
@@ -144,6 +144,12 @@ checkTodo nowDone model =
 
         _ ->
             checkTodo (Dict.keys newDone |> Set.fromList) newModel
+
+
+finalize : Model -> Module -> Module
+finalize _ m =
+    -- TODO: Gather declarations and uses
+    m
 
 
 requiredModules : Module -> Model -> Set Syntax.ModuleName
