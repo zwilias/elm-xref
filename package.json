@@ -1,0 +1,17 @@
+{
+  "name": "elm-xref",
+  "version": "1.0.0",
+  "description": "Cross referencing tool for Elm - find usages and unused code",
+  "main": "index.js",
+  "author": "Ilias Van Peer",
+  "license": "BSD-3-Clause",
+  "bin": {
+    "elm-xref": "index.js"
+  },
+  "dependencies": {
+    "bluebird": "^3.5.1",
+    "fs-extra": "^6.0.1",
+    "klaw": "^2.1.1",
+    "through2": "^2.0.3"
+  }
+}
