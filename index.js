@@ -9,6 +9,14 @@ var through2 = require("through2");
 var app = Elm.Main.worker();
 
 app.ports.toJS.subscribe(console.dir);
+app.ports.allUnused.subscribe(printUnused);
+
+function printUnused(unusedItems) {
+    console.log("Unused functions:");
+    unusedItems.map(unused =>
+        console.log(" - " + unused.modul.join(".") + "." + unused.fun)
+    );
+}
 
 fs
     .readFile("elm-package.json")
