@@ -16,19 +16,7 @@ import Json.Encode as Json
 import Set exposing (Set)
 
 
-type alias Model =
-    { todo :
-        List
-            { blockedBy : Set Syntax.ModuleName
-            , data : Module
-            }
-    , done : Dict Syntax.ModuleName InModule
-    , entryPoints : Set QFunction
-    , callGraph : Dict QFunction (Set QFunction)
-    }
-
-
-type alias QFunction =
+type alias Function =
     ( Syntax.ModuleName, String )
 
 
@@ -45,12 +33,12 @@ type alias PackageIdentifier =
     }
 
 
-type InModule
-    = Package InterfaceData
-    | Own Module
+type Module
+    = Package PackageData
+    | Own ModuleData
 
 
-type alias InterfaceData =
+type alias PackageData =
     { name : Syntax.ModuleName
     , fileName : String
     , interface : Interface
@@ -58,7 +46,7 @@ type alias InterfaceData =
     }
 
 
-type alias Module =
+type alias ModuleData =
     { name : Syntax.ModuleName
     , fileName : String
     , interface : Interface
@@ -67,60 +55,55 @@ type alias Module =
     }
 
 
-type Msg
-    = Parse InFile
-    | Send
+type alias DeclDict =
+    { unqualified : List String
+    , qualified : List String
+    , qualifier : List String
+    , name : List String
+    }
 
 
-init : ( Model, Cmd msg )
-init =
-    ( { todo = []
-      , done = Dict.empty
-      , entryPoints = Set.empty
-      , callGraph = Dict.empty
-      }
-    , Cmd.none
-    )
+type alias Caller =
+    { modul : Syntax.ModuleName
+    , fun : String
+    , line : Int
+    }
 
 
-update : Msg -> Model -> ( Model, Cmd Msg )
-update msg model =
-    case msg of
-        Parse file ->
-            case parse file of
-                Ok mod ->
-                    ( add mod model
-                    , toJS <| Json.string <| "parsed " ++ file.fileName
-                    )
-
-                Err e ->
-                    ( model
-                    , toJS <| Json.string <| file.fileName ++ ": " ++ toString e
-                    )
-
-        Send ->
-            ( model
-            , allUnused <| Set.toList <| findUnused model
-            )
+type alias Usage =
+    { caller : Caller
+    , callee :
+        { modul : Syntax.ModuleName
+        , fun : String
+        }
+    }
 
 
-findUnused : Model -> Set QFunction
+type alias Scope =
+    { modul : Syntax.ModuleName
+    , function : String
+    , extra : List (List String)
+    , available : List DeclDict
+    }
+
+
+findUnused : Model -> Set Function
 findUnused model =
     let
-        usedFunctions : Set QFunction
+        usedFunctions : Set Function
         usedFunctions =
             Set.foldl (walkGraph model.callGraph)
                 Set.empty
                 model.entryPoints
 
-        allOwnFunctions : Set QFunction
+        allOwnFunctions : Set Function
         allOwnFunctions =
             Dict.foldl findOwnFunctions Set.empty model.done
     in
     Set.diff allOwnFunctions usedFunctions
 
 
-walkGraph : Dict QFunction (Set QFunction) -> QFunction -> Set QFunction -> Set QFunction
+walkGraph : Dict Function (Set Function) -> Function -> Set Function -> Set Function
 walkGraph graph func acc =
     case Set.member func acc of
         True ->
@@ -132,7 +115,7 @@ walkGraph graph func acc =
                 |> Set.foldl (walkGraph graph) (Set.insert func acc)
 
 
-findOwnFunctions : Syntax.ModuleName -> InModule -> Set QFunction -> Set QFunction
+findOwnFunctions : Syntax.ModuleName -> Module -> Set Function -> Set Function
 findOwnFunctions name modul acc =
     case modul of
         Package _ ->
@@ -151,7 +134,7 @@ type alias Errors =
     List String
 
 
-add : InModule -> Model -> Model
+add : Module -> Model -> Model
 add mod model =
     case mod of
         Package package ->
@@ -164,14 +147,14 @@ add mod model =
                 |> checkTodo Set.empty
 
 
-todoItem : Module -> Model -> { blockedBy : Set Syntax.ModuleName, data : Module }
+todoItem : ModuleData -> Model -> { blockedBy : Set Syntax.ModuleName, data : ModuleData }
 todoItem modul model =
     { blockedBy = requiredModules modul model
     , data = modul
     }
 
 
-findEntryPoints : Module -> Model -> Model
+findEntryPoints : ModuleData -> Model -> Model
 findEntryPoints modul model =
     case Interface.exposesFunction "main" modul.interface of
         True ->
@@ -197,13 +180,9 @@ checkTodo nowDone model =
                             Set.diff blockedBy nowDone
                     in
                     if Set.isEmpty newBlockers then
-                        let
-                            ( modul, usg ) =
-                                finalize model data
-                        in
-                        ( modul :: done
+                        ( data :: done
                         , todo
-                        , usg :: usages
+                        , finalize model data :: usages
                         )
                     else
                         ( done
@@ -234,7 +213,7 @@ updateCallGraph usages model =
     { model | callGraph = List.foldl addCall model.callGraph usages }
 
 
-addCall : Usage -> Dict QFunction (Set QFunction) -> Dict QFunction (Set QFunction)
+addCall : Usage -> Dict Function (Set Function) -> Dict Function (Set Function)
 addCall { caller, callee } graph =
     Dict.update ( caller.modul, caller.fun )
         (\calls ->
@@ -248,31 +227,7 @@ addCall { caller, callee } graph =
         graph
 
 
-type alias DeclDict =
-    { unqualified : List String
-    , qualified : List String
-    , qualifier : List String
-    , name : List String
-    }
-
-
-type alias Caller =
-    { modul : Syntax.ModuleName
-    , fun : String
-    , line : Int
-    }
-
-
-type alias Usage =
-    { caller : Caller
-    , callee :
-        { modul : Syntax.ModuleName
-        , fun : String
-        }
-    }
-
-
-finalize : Model -> Module -> ( Module, List Usage )
+finalize : Model -> ModuleData -> List Usage
 finalize m modul =
     let
         importedDecls : List DeclDict
@@ -282,19 +237,8 @@ finalize m modul =
         scope : List DeclDict
         scope =
             importedDecls ++ defaultImports
-
-        initialUsages : Dict String (List Caller)
-        initialUsages =
-            List.foldl
-                (\f ->
-                    Dict.insert f []
-                )
-                Dict.empty
-                (List.concatMap (Ranged.value >> resolve) modul.declarations)
     in
-    ( modul
-    , gatherCalls modul.name scope modul.declarations
-    )
+    gatherCalls modul.name scope modul.declarations
 
 
 gatherCalls : Syntax.ModuleName -> List DeclDict -> List (Ranged Declaration) -> List Usage
@@ -313,14 +257,6 @@ gatherCalls name scope decls =
             localScope :: scope
     in
     List.foldl (gatherDeclarationCalls name currentScope) [] decls
-
-
-type alias Scope =
-    { modul : Syntax.ModuleName
-    , function : String
-    , extra : List (List String)
-    , available : List DeclDict
-    }
 
 
 gatherDeclarationCalls :
@@ -342,14 +278,8 @@ gatherDeclarationCalls name scope decl acc =
             gatherExpression
                 { modul = name
                 , function = declaration.name.value
-                , extra = []
-                , available =
-                    { qualified = []
-                    , unqualified = List.concatMap patternToNames declaration.arguments
-                    , qualifier = []
-                    , name = name
-                    }
-                        :: scope
+                , extra = [ List.concatMap patternToNames declaration.arguments ]
+                , available = scope
                 }
                 declaration.expression
                 acc
@@ -577,7 +507,7 @@ patternToNames pat =
             []
 
 
-interface : InModule -> Interface
+interface : Module -> Interface
 interface mod =
     case mod of
         Package p ->
@@ -587,7 +517,7 @@ interface mod =
             m.interface
 
 
-declImportDict : Dict Syntax.ModuleName InModule -> Module.Import -> DeclDict
+declImportDict : Dict Syntax.ModuleName Module -> Module.Import -> DeclDict
 declImportDict modules imports =
     let
         iface : Interface
@@ -630,6 +560,205 @@ declImportDict modules imports =
                     |> Maybe.withDefault imports.moduleName
             , name = imports.moduleName
             }
+
+
+resolveImport :
+    Interface
+    -> Exposing.TopLevelExpose
+    -> List String
+resolveImport iface expose =
+    case expose of
+        Exposing.InfixExpose i ->
+            [ i ]
+
+        Exposing.FunctionExpose f ->
+            [ f ]
+
+        _ ->
+            []
+
+
+resolveInterface : Interface -> List String
+resolveInterface =
+    List.concatMap resolveExposed
+
+
+resolveExposed : Interface.Exposed -> List String
+resolveExposed exp =
+    case exp of
+        Interface.Function s ->
+            [ s ]
+
+        Interface.Operator i ->
+            [ i.operator ]
+
+        _ ->
+            []
+
+
+resolve : Declaration -> List String
+resolve decl =
+    case decl of
+        Declaration.FuncDecl f ->
+            [ f.declaration.name.value ]
+
+        Declaration.PortDeclaration p ->
+            [ p.name.value ]
+
+        Declaration.Destructuring p _ ->
+            patternToNames p
+
+        _ ->
+            []
+
+
+requiredModules : ModuleData -> Model -> Set Syntax.ModuleName
+requiredModules modul model =
+    let
+        needed =
+            List.map .moduleName modul.imports
+                |> List.filter (not << isNative)
+                |> Set.fromList
+    in
+    Set.diff needed (availableModules model)
+
+
+isNative : Syntax.ModuleName -> Bool
+isNative =
+    List.head >> Maybe.map ((==) "Native") >> Maybe.withDefault False
+
+
+availableModules : Model -> Set Syntax.ModuleName
+availableModules model =
+    Dict.keys model.done
+        |> Set.fromList
+
+
+parse : InFile -> Result Errors Module
+parse file =
+    Parser.parse file.content
+        |> Result.map (toModule file.package file.fileName)
+
+
+toModule : Maybe PackageIdentifier -> String -> RawFile -> Module
+toModule package fileName rawFile =
+    case package of
+        Just packageInfo ->
+            toPackageModule packageInfo fileName rawFile
+
+        Nothing ->
+            toInternalModule fileName rawFile
+
+
+toPackageModule : PackageIdentifier -> String -> RawFile -> Module
+toPackageModule package fileName rawFile =
+    Package
+        { name = RawFile.moduleName rawFile |> Maybe.withDefault []
+        , fileName = fileName
+        , interface = Interface.build rawFile
+        , package = package
+        }
+
+
+toInternalModule : String -> RawFile -> Module
+toInternalModule fileName rawFile =
+    let
+        file =
+            Processing.process Processing.init rawFile
+    in
+    Own
+        { name = RawFile.moduleName rawFile |> Maybe.withDefault []
+        , fileName = fileName
+        , interface = Interface.build rawFile
+        , imports = file.imports
+        , declarations = file.declarations
+        }
+
+
+
+-- Program
+
+
+port toElm : (InFile -> msg) -> Sub msg
+
+
+port toJS : Json.Value -> Cmd msg
+
+
+port allUnused : List Function -> Cmd msg
+
+
+port fetch : (() -> msg) -> Sub msg
+
+
+type alias Model =
+    { todo :
+        List
+            { blockedBy : Set Syntax.ModuleName
+            , data : ModuleData
+            }
+    , done : Dict Syntax.ModuleName Module
+    , entryPoints : Set Function
+    , callGraph : Dict Function (Set Function)
+    }
+
+
+type Msg
+    = Parse InFile
+    | Send
+
+
+init : ( Model, Cmd msg )
+init =
+    ( { todo = []
+      , done = Dict.empty
+      , entryPoints = Set.empty
+      , callGraph = Dict.empty
+      }
+    , Cmd.none
+    )
+
+
+update : Msg -> Model -> ( Model, Cmd Msg )
+update msg model =
+    case msg of
+        Parse file ->
+            case parse file of
+                Ok mod ->
+                    ( add mod model
+                    , toJS <| Json.string <| "parsed " ++ file.fileName
+                    )
+
+                Err e ->
+                    ( model
+                    , toJS <| Json.string <| file.fileName ++ ": " ++ toString e
+                    )
+
+        Send ->
+            ( model
+            , allUnused <| Set.toList <| findUnused model
+            )
+
+
+subscriptions : Sub Msg
+subscriptions =
+    Sub.batch
+        [ toElm Parse
+        , fetch (always Send)
+        ]
+
+
+main : Program Never Model Msg
+main =
+    Platform.program
+        { init = init
+        , update = update
+        , subscriptions = always subscriptions
+        }
+
+
+
+-- Static helperdata
 
 
 defaultImports : List DeclDict
@@ -849,145 +978,3 @@ basicFunctions =
     , "uncurry"
     , "never"
     ]
-
-
-resolveImport :
-    Interface
-    -> Exposing.TopLevelExpose
-    -> List String
-resolveImport iface expose =
-    case expose of
-        Exposing.InfixExpose i ->
-            [ i ]
-
-        Exposing.FunctionExpose f ->
-            [ f ]
-
-        _ ->
-            []
-
-
-resolveInterface : Interface -> List String
-resolveInterface =
-    List.concatMap resolveExposed
-
-
-resolveExposed : Interface.Exposed -> List String
-resolveExposed exp =
-    case exp of
-        Interface.Function s ->
-            [ s ]
-
-        Interface.Operator i ->
-            [ i.operator ]
-
-        _ ->
-            []
-
-
-resolve : Declaration -> List String
-resolve decl =
-    case decl of
-        Declaration.FuncDecl f ->
-            [ f.declaration.name.value ]
-
-        Declaration.PortDeclaration p ->
-            [ p.name.value ]
-
-        Declaration.Destructuring p _ ->
-            patternToNames p
-
-        _ ->
-            []
-
-
-requiredModules : Module -> Model -> Set Syntax.ModuleName
-requiredModules modul model =
-    let
-        needed =
-            List.map .moduleName modul.imports
-                |> List.filter (not << isNative)
-                |> Set.fromList
-    in
-    Set.diff needed (availableModules model)
-
-
-isNative : Syntax.ModuleName -> Bool
-isNative =
-    List.head >> Maybe.map ((==) "Native") >> Maybe.withDefault False
-
-
-availableModules : Model -> Set Syntax.ModuleName
-availableModules model =
-    Dict.keys model.done
-        |> Set.fromList
-
-
-parse : InFile -> Result Errors InModule
-parse file =
-    Parser.parse file.content
-        |> Result.map (toModule file.package file.fileName)
-
-
-toModule : Maybe PackageIdentifier -> String -> RawFile -> InModule
-toModule package fileName rawFile =
-    case package of
-        Just packageInfo ->
-            toPackageModule packageInfo fileName rawFile
-
-        Nothing ->
-            toInternalModule fileName rawFile
-
-
-toPackageModule : PackageIdentifier -> String -> RawFile -> InModule
-toPackageModule package fileName rawFile =
-    Package
-        { name = RawFile.moduleName rawFile |> Maybe.withDefault []
-        , fileName = fileName
-        , interface = Interface.build rawFile
-        , package = package
-        }
-
-
-toInternalModule : String -> RawFile -> InModule
-toInternalModule fileName rawFile =
-    let
-        file =
-            Processing.process Processing.init rawFile
-    in
-    Own
-        { name = RawFile.moduleName rawFile |> Maybe.withDefault []
-        , fileName = fileName
-        , interface = Interface.build rawFile
-        , imports = file.imports
-        , declarations = file.declarations
-        }
-
-
-port toElm : (InFile -> msg) -> Sub msg
-
-
-port toJS : Json.Value -> Cmd msg
-
-
-port allUnused : List QFunction -> Cmd msg
-
-
-port fetch : (() -> msg) -> Sub msg
-
-
-subscriptions : Sub Msg
-subscriptions =
-    Sub.batch
-        [ toElm Parse
-        , fetch (always Send)
-        ]
-
-
-main : Program Never Model Msg
-main =
-    Platform.program
-        { init = init
-        , update = update
-        , subscriptions = always subscriptions
-        }
