@@ -5,17 +5,21 @@ var Promise = require("bluebird");
 var fs = require("fs-extra");
 var klaw = require("klaw");
 var through2 = require("through2");
+var crypto = require("crypto");
 
 var app = Elm.Main.worker();
 
 app.ports.toJS.subscribe(console.dir);
 app.ports.allUnused.subscribe(printUnused);
+app.ports.storeFile.subscribe(storeFile);
 
 function printUnused(unusedItems) {
+    console.log("");
     console.log("Unused functions:");
     unusedItems.map(unused =>
         console.log(" - " + unused[0].join(".") + "." + unused[1])
     );
+    console.log("");
 }
 
 fs
@@ -30,6 +34,7 @@ fs
     .then(() => app.ports.fetch.send(null));
 
 function parsePackage(packageName) {
+    console.log("Parsing dependency", packageName);
     return parsePackageName(packageName)
         .then(findVersion)
         .then(findExposedModules)
@@ -37,6 +42,7 @@ function parsePackage(packageName) {
 }
 
 function parseSources(sourceDirectory) {
+    console.log("Parsing sources in", sourceDirectory);
     return findElmFiles(sourceDirectory).then(sources =>
         Promise.map(sources, parseSource)
     );
@@ -44,12 +50,44 @@ function parseSources(sourceDirectory) {
 
 function parseSource(modulePath) {
     return fs.readFile(modulePath).then(data =>
-        app.ports.toElm.send({
-            fileName: modulePath,
-            content: data.toString(),
-            package: null
-        })
+        readCache(hash(data))
+            .then(cachedData =>
+                app.ports.restore.send({
+                    fileName: modulePath,
+                    package: null,
+                    data: cachedData
+                })
+            )
+            .catch(() =>
+                app.ports.toElm.send({
+                    fileName: modulePath,
+                    content: data.toString(),
+                    package: null
+                })
+            )
     );
+}
+
+function readCache(hash) {
+    return fs.readJson("elm-stuff/xref/cache/" + hash + ".json");
+}
+
+function hash(content) {
+    return crypto
+        .createHash("md5")
+        .update(content)
+        .digest("hex");
+}
+
+function storeFile(fileInfo) {
+    return fs
+        .ensureDir("elm-stuff/xref/cache")
+        .then(() =>
+            fs.writeJson(
+                "elm-stuff/xref/cache/" + hash(fileInfo.content) + ".json",
+                fileInfo.data
+            )
+        );
 }
 
 var excludeDirFilter = through2.obj(function(item, enc, next) {
@@ -106,14 +144,27 @@ function parsePackageModule(pkg) {
         return Promise.any(
             fileNames.map(name =>
                 fs.readFile(name).then(content =>
-                    app.ports.toElm.send({
-                        package: {
-                            name: packageToName(pkg),
-                            version: pkg.version
-                        },
-                        fileName: name,
-                        content: content.toString()
-                    })
+                    readCache(hash(content))
+                        .then(data =>
+                            app.ports.restore.send({
+                                fileName: name,
+                                package: {
+                                    name: packageToName(pkg),
+                                    version: pkg.version
+                                },
+                                data
+                            })
+                        )
+                        .catch(() =>
+                            app.ports.toElm.send({
+                                package: {
+                                    name: packageToName(pkg),
+                                    version: pkg.version
+                                },
+                                fileName: name,
+                                content: content.toString()
+                            })
+                        )
                 )
             )
         );

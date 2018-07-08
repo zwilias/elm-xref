@@ -2,6 +2,8 @@ port module Main exposing (main, toElm, toJS)
 
 import Dict exposing (Dict)
 import Elm.Interface as Interface exposing (Interface)
+import Elm.Json.Decode as RawFile
+import Elm.Json.Encode as RawFile
 import Elm.Parser as Parser
 import Elm.Processing as Processing
 import Elm.RawFile as RawFile exposing (RawFile)
@@ -12,7 +14,8 @@ import Elm.Syntax.Expression as Expression exposing (Expression)
 import Elm.Syntax.Module as Module exposing (Import)
 import Elm.Syntax.Pattern as Pattern exposing (Pattern)
 import Elm.Syntax.Ranged as Ranged exposing (Ranged)
-import Json.Encode as Json
+import Json.Decode as Decode
+import Json.Encode as Encode
 import Set exposing (Set)
 
 
@@ -24,6 +27,13 @@ type alias InFile =
     { package : Maybe PackageIdentifier
     , fileName : String
     , content : String
+    }
+
+
+type alias CachedFile =
+    { package : Maybe PackageIdentifier
+    , fileName : String
+    , data : Encode.Value
     }
 
 
@@ -634,10 +644,21 @@ availableModules model =
         |> Set.fromList
 
 
-parse : InFile -> Result Errors Module
+parse : InFile -> Result Errors ( Module, Encode.Value )
 parse file =
     Parser.parse file.content
-        |> Result.map (toModule file.package file.fileName)
+        |> Result.map
+            (\rawFile ->
+                ( toModule file.package file.fileName rawFile
+                , RawFile.encode rawFile
+                )
+            )
+
+
+parseCached : CachedFile -> Result String Module
+parseCached cached =
+    Decode.decodeValue RawFile.decode cached.data
+        |> Result.map (toModule cached.package cached.fileName)
 
 
 toModule : Maybe PackageIdentifier -> String -> RawFile -> Module
@@ -682,13 +703,28 @@ toInternalModule fileName rawFile =
 port toElm : (InFile -> msg) -> Sub msg
 
 
-port toJS : Json.Value -> Cmd msg
+port restore : (CachedFile -> msg) -> Sub msg
+
+
+port toJS : Encode.Value -> Cmd msg
 
 
 port allUnused : List Function -> Cmd msg
 
 
 port fetch : (() -> msg) -> Sub msg
+
+
+port storeFile :
+    { content : String
+    , data : Encode.Value
+    }
+    -> Cmd msg
+
+
+store : InFile -> Encode.Value -> Cmd msg
+store file data =
+    storeFile { content = file.content, data = data }
 
 
 type alias Model =
@@ -705,6 +741,7 @@ type alias Model =
 
 type Msg
     = Parse InFile
+    | Restore CachedFile
     | Send
 
 
@@ -724,14 +761,29 @@ update msg model =
     case msg of
         Parse file ->
             case parse file of
-                Ok mod ->
+                Ok ( mod, data ) ->
                     ( add mod model
-                    , toJS <| Json.string <| "parsed " ++ file.fileName
+                    , store file data
                     )
 
                 Err e ->
                     ( model
-                    , toJS <| Json.string <| file.fileName ++ ": " ++ toString e
+                    , toJS <| Encode.string <| file.fileName ++ ": " ++ toString e
+                    )
+
+        Restore cached ->
+            case parseCached cached of
+                Ok mod ->
+                    ( add mod model
+                    , Cmd.none
+                    )
+
+                Err e ->
+                    ( model
+                    , Cmd.batch
+                        [ toJS <| Encode.string <| toString e
+                        , toJS <| Encode.string cached.fileName
+                        ]
                     )
 
         Send ->
@@ -745,6 +797,7 @@ subscriptions =
     Sub.batch
         [ toElm Parse
         , fetch (always Send)
+        , restore Restore
         ]
 
 
