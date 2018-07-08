@@ -55,7 +55,6 @@ type alias InterfaceData =
     , fileName : String
     , interface : Interface
     , package : PackageIdentifier
-    , usages : Dict String (List Caller)
     }
 
 
@@ -65,7 +64,6 @@ type alias Module =
     , interface : Interface
     , imports : List Import
     , declarations : List (Ranged Declaration)
-    , usages : Dict String (List Caller)
     }
 
 
@@ -141,22 +139,12 @@ findOwnFunctions name modul acc =
             acc
 
         Own m ->
-            Dict.foldl
-                (\k _ fs ->
-                    Set.insert ( name, k ) fs
+            List.foldl
+                (\f fs ->
+                    Set.insert ( name, f ) fs
                 )
                 acc
-                m.usages
-
-
-usages : InModule -> Dict String (List Caller)
-usages mod =
-    case mod of
-        Own m ->
-            m.usages
-
-        Package p ->
-            p.usages
+                (List.concatMap (Ranged.value >> resolve) m.declarations)
 
 
 type alias Errors =
@@ -237,14 +225,8 @@ checkTodo nowDone model =
             newModel
 
         _ ->
-            List.foldl registerUsages newModel usages
+            List.foldl updateCallGraph newModel usages
                 |> checkTodo (Dict.keys newDone |> Set.fromList)
-
-
-registerUsages : List Usage -> Model -> Model
-registerUsages usages model =
-    { model | done = List.foldl registerUsage model.done usages }
-        |> updateCallGraph usages
 
 
 updateCallGraph : List Usage -> Model -> Model
@@ -264,53 +246,6 @@ addCall { caller, callee } graph =
                     Just <| Set.insert ( callee.modul, callee.fun ) c
         )
         graph
-
-
-registerUsage : Usage -> Dict Syntax.ModuleName InModule -> Dict Syntax.ModuleName InModule
-registerUsage usage mods =
-    Dict.update usage.callee.modul
-        (\modul ->
-            case modul of
-                Nothing ->
-                    Nothing
-
-                Just (Own mod) ->
-                    Just <|
-                        Own
-                            { mod
-                                | usages =
-                                    registerCaller
-                                        usage.callee.fun
-                                        usage.caller
-                                        mod.usages
-                            }
-
-                Just (Package pkg) ->
-                    Just <|
-                        Package
-                            { pkg
-                                | usages =
-                                    registerCaller
-                                        usage.callee.fun
-                                        usage.caller
-                                        pkg.usages
-                            }
-        )
-        mods
-
-
-registerCaller : String -> Caller -> Dict String (List Caller) -> Dict String (List Caller)
-registerCaller fun caller usages =
-    Dict.update fun
-        (\u ->
-            case u of
-                Nothing ->
-                    Just [ caller ]
-
-                Just calls ->
-                    Just (caller :: calls)
-        )
-        usages
 
 
 type alias DeclDict =
@@ -357,7 +292,7 @@ finalize m modul =
                 Dict.empty
                 (List.concatMap (Ranged.value >> resolve) modul.declarations)
     in
-    ( { modul | usages = initialUsages }
+    ( modul
     , gatherCalls modul.name scope modul.declarations
     )
 
@@ -397,7 +332,10 @@ gatherDeclarationCalls :
 gatherDeclarationCalls name scope decl acc =
     case Ranged.value decl of
         Declaration.Destructuring pat expression ->
-            -- TODO: enter the `i`
+            -- NOTE: in 0.18, you can still destructure a complex expression,
+            -- meaning that each usage would correspond to the definition of
+            -- (possibly) many variables. This is annoying, an 0.19 doesn't
+            -- allow it anymore, so ignoring that use-case for now.
             acc
 
         Declaration.FuncDecl { declaration } ->
@@ -1008,7 +946,6 @@ toPackageModule package fileName rawFile =
         , fileName = fileName
         , interface = Interface.build rawFile
         , package = package
-        , usages = Dict.empty
         }
 
 
@@ -1024,7 +961,6 @@ toInternalModule fileName rawFile =
         , interface = Interface.build rawFile
         , imports = file.imports
         , declarations = file.declarations
-        , usages = Dict.empty
         }
 
 

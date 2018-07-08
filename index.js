@@ -99,10 +99,9 @@ function parsePackageModule(pkg) {
     var pkgPath = basePath(pkg);
 
     return function(moduleName) {
-        var fileNames = [
-            pkgPath + "src/" + modulePath(moduleName),
-            pkgPath + modulePath(moduleName)
-        ];
+        var fileNames = pkg["source-directories"].map(
+            sourceDir => pkgPath + sourceDir + "/" + modulePath(moduleName)
+        );
 
         return Promise.any(
             fileNames.map(name =>
@@ -166,7 +165,11 @@ function basePath(pkg) {
 function findExposedModules(pkg) {
     return fs.readFile(basePath(pkg) + "elm-package.json").then(data => {
         var info = JSON.parse(data);
-        return { ...pkg, modules: info["exposed-modules"] };
+        return {
+            ...pkg,
+            "source-directories": info["source-directories"],
+            modules: info["exposed-modules"]
+        };
     });
 }
 
