@@ -14,7 +14,7 @@ app.ports.allUnused.subscribe(printUnused);
 function printUnused(unusedItems) {
     console.log("Unused functions:");
     unusedItems.map(unused =>
-        console.log(" - " + unused.modul.join(".") + "." + unused.fun)
+        console.log(" - " + unused[0].join(".") + "." + unused[1])
     );
 }
 

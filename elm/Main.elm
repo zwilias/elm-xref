@@ -23,7 +23,13 @@ type alias Model =
             , data : Module
             }
     , done : Dict Syntax.ModuleName InModule
+    , entryPoints : Set QFunction
+    , callGraph : Dict QFunction (Set QFunction)
     }
+
+
+type alias QFunction =
+    ( Syntax.ModuleName, String )
 
 
 type alias InFile =
@@ -72,6 +78,8 @@ init : ( Model, Cmd msg )
 init =
     ( { todo = []
       , done = Dict.empty
+      , entryPoints = Set.empty
+      , callGraph = Dict.empty
       }
     , Cmd.none
     )
@@ -94,43 +102,51 @@ update msg model =
 
         Send ->
             ( model
-            , allUnused <| findUnused model.done
+            , allUnused <| Set.toList <| findUnused model
             )
 
 
-type alias Unused =
-    { modul : Syntax.ModuleName
-    , fun : String
-    }
+findUnused : Model -> Set QFunction
+findUnused model =
+    let
+        usedFunctions : Set QFunction
+        usedFunctions =
+            Set.foldl (walkGraph model.callGraph)
+                Set.empty
+                model.entryPoints
+
+        allOwnFunctions : Set QFunction
+        allOwnFunctions =
+            Dict.foldl findOwnFunctions Set.empty model.done
+    in
+    Set.diff allOwnFunctions usedFunctions
 
 
-findUnused : Dict Syntax.ModuleName InModule -> List Unused
-findUnused allCalls =
-    Dict.foldl
-        (\k mod acc ->
-            findUnusedInModule k (usages mod) acc
-        )
-        []
-        allCalls
+walkGraph : Dict QFunction (Set QFunction) -> QFunction -> Set QFunction -> Set QFunction
+walkGraph graph func acc =
+    case Set.member func acc of
+        True ->
+            acc
+
+        False ->
+            Dict.get func graph
+                |> Maybe.withDefault Set.empty
+                |> Set.foldl (walkGraph graph) (Set.insert func acc)
 
 
-findUnusedInModule :
-    Syntax.ModuleName
-    -> Dict String (List Caller)
-    -> List Unused
-    -> List Unused
-findUnusedInModule mod calls callsAcc =
-    Dict.foldl
-        (\f callers acc ->
-            case callers of
-                [] ->
-                    { modul = mod, fun = f } :: acc
+findOwnFunctions : Syntax.ModuleName -> InModule -> Set QFunction -> Set QFunction
+findOwnFunctions name modul acc =
+    case modul of
+        Package _ ->
+            acc
 
-                _ ->
-                    acc
-        )
-        callsAcc
-        calls
+        Own m ->
+            Dict.foldl
+                (\k _ fs ->
+                    Set.insert ( name, k ) fs
+                )
+                acc
+                m.usages
 
 
 usages : InModule -> Dict String (List Caller)
@@ -156,6 +172,7 @@ add mod model =
 
         Own modul ->
             { model | todo = todoItem modul model :: model.todo }
+                |> findEntryPoints modul
                 |> checkTodo Set.empty
 
 
@@ -164,6 +181,21 @@ todoItem modul model =
     { blockedBy = requiredModules modul model
     , data = modul
     }
+
+
+findEntryPoints : Module -> Model -> Model
+findEntryPoints modul model =
+    case Interface.exposesFunction "main" modul.interface of
+        True ->
+            { model
+                | entryPoints =
+                    Set.insert
+                        ( modul.name, "main" )
+                        model.entryPoints
+            }
+
+        False ->
+            model
 
 
 checkTodo : Set Syntax.ModuleName -> Model -> Model
@@ -212,6 +244,26 @@ checkTodo nowDone model =
 registerUsages : List Usage -> Model -> Model
 registerUsages usages model =
     { model | done = List.foldl registerUsage model.done usages }
+        |> updateCallGraph usages
+
+
+updateCallGraph : List Usage -> Model -> Model
+updateCallGraph usages model =
+    { model | callGraph = List.foldl addCall model.callGraph usages }
+
+
+addCall : Usage -> Dict QFunction (Set QFunction) -> Dict QFunction (Set QFunction)
+addCall { caller, callee } graph =
+    Dict.update ( caller.modul, caller.fun )
+        (\calls ->
+            case calls of
+                Nothing ->
+                    Just <| Set.singleton ( callee.modul, callee.fun )
+
+                Just c ->
+                    Just <| Set.insert ( callee.modul, callee.fun ) c
+        )
+        graph
 
 
 registerUsage : Usage -> Dict Syntax.ModuleName InModule -> Dict Syntax.ModuleName InModule
@@ -447,8 +499,10 @@ gatherExpression scope ( range, expr ) acc =
         Expression.RecordAccess record _ ->
             gatherExpression scope record acc
 
-        Expression.RecordUpdateExpression { updates } ->
-            List.foldl (\( _, e ) -> gatherExpression scope e) acc updates
+        Expression.RecordUpdateExpression { name, updates } ->
+            List.foldl (\( _, e ) -> gatherExpression scope e)
+                (register range.start.row name scope acc)
+                updates
 
         _ ->
             acc
@@ -980,7 +1034,7 @@ port toElm : (InFile -> msg) -> Sub msg
 port toJS : Json.Value -> Cmd msg
 
 
-port allUnused : List Unused -> Cmd msg
+port allUnused : List QFunction -> Cmd msg
 
 
 port fetch : (() -> msg) -> Sub msg
