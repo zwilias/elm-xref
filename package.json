@@ -17,7 +17,7 @@
         "through2": "^2.0.3"
     },
     "scripts": {
-        "elm": "elm-make --yes src/Main.elm --output elm.js",
+        "elm": "elm-make --yes elm/Main.elm --output elm.js",
         "prepublishOnly": "npm run elm"
     },
     "files": ["index.js", "elm.js"]
