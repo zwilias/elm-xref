@@ -12,15 +12,7 @@ var app = Elm.Main.worker();
 app.ports.toJS.subscribe(console.dir);
 app.ports.allUnused.subscribe(printUnused);
 app.ports.storeFile.subscribe(storeFile);
-
-function printUnused(unusedItems) {
-    console.log("");
-    console.log("Unused functions:");
-    unusedItems.map(unused =>
-        console.log(" - " + unused[0].join(".") + "." + unused[1])
-    );
-    console.log("");
-}
+app.ports.showUsages.subscribe(showUsages);
 
 fs
     .readFile("elm-package.json")
@@ -31,7 +23,34 @@ fs
         )
     )
     .then(info => Promise.map(info["source-directories"], parseSources))
-    .then(() => app.ports.fetch.send(null));
+    .then(() => {
+        if (process.argv.length > 2) {
+            var mod = process.argv[2].split(".");
+            var fun = mod.pop();
+
+            app.ports.check.send([mod, fun]);
+        } else {
+            app.ports.fetch.send(null);
+        }
+    });
+
+function printUnused(unusedItems) {
+    console.log("");
+    console.log("Unused functions:");
+    unusedItems.map(unused =>
+        console.log(" - " + unused[0].join(".") + "." + unused[1])
+    );
+    console.log("");
+}
+
+function showUsages(usages) {
+    console.log("");
+    console.log("Usages:");
+    usages.map(usage =>
+        console.log(" - " + usage[0].join(".") + "." + usage[1])
+    );
+    console.log("");
+}
 
 function parsePackage(packageName) {
     console.log("Parsing dependency", packageName);

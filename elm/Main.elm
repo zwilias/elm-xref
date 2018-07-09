@@ -140,6 +140,12 @@ findOwnFunctions name modul acc =
                 (List.concatMap (Ranged.value >> resolve) m.declarations)
 
 
+findUsages : Function -> Dict Function (Set Function) -> List Function
+findUsages fun =
+    Dict.filter (always <| Set.member fun)
+        >> Dict.keys
+
+
 type alias Errors =
     List String
 
@@ -715,11 +721,17 @@ port allUnused : List Function -> Cmd msg
 port fetch : (() -> msg) -> Sub msg
 
 
+port check : (Function -> msg) -> Sub msg
+
+
 port storeFile :
     { content : String
     , data : Encode.Value
     }
     -> Cmd msg
+
+
+port showUsages : List Function -> Cmd msg
 
 
 store : InFile -> Encode.Value -> Cmd msg
@@ -743,6 +755,7 @@ type Msg
     = Parse InFile
     | Restore CachedFile
     | Send
+    | Check Function
 
 
 init : ( Model, Cmd msg )
@@ -791,6 +804,11 @@ update msg model =
             , allUnused <| Set.toList <| findUnused model
             )
 
+        Check fun ->
+            ( model
+            , showUsages <| findUsages fun model.callGraph
+            )
+
 
 subscriptions : Sub Msg
 subscriptions =
@@ -798,6 +816,7 @@ subscriptions =
         [ toElm Parse
         , fetch (always Send)
         , restore Restore
+        , check Check
         ]
 
 
