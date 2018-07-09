@@ -1,3 +1,0 @@
-[submodule "vendor/elm-syntax"]
-	path = vendor/elm-syntax
-	url = git@github.com:zwilias/elm-syntax.git
