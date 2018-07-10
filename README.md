@@ -27,6 +27,15 @@ $ elm-xref
 $ elm-xref Maybe.map
 ```
 
+Value constructors of types are also tracked. Note that only constructing values
+is tracked as usage - pattern matches and destructuring are _not_ tracked as
+usage.
+
+Usage tracking isn't terribly clever. This tool only does static analysis and
+does not attempt to evaluate any expressions. As a result, functions that only
+appear in "obviously unreachable code" (i.e. conditionals that always evaluate
+to `False`) do very much count as usage.
+
 ## Roadmap
 
 - [x] Show unused functions
