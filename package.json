@@ -1,6 +1,6 @@
 {
     "name": "elm-xref",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description":
         "Cross referencing tool for Elm - find usages and unused code",
     "main": "index.js",
