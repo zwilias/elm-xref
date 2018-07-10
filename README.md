@@ -27,6 +27,18 @@ $ elm-xref
 $ elm-xref Maybe.map
 ```
 
+## Roadmap
+
+- [x] Show unused functions
+- [x] Find usages
+- [x] Support union type constructors
+- [ ] Support type aliases (as function and in type signatures)
+- [ ] Support effect modules
+- [ ] Support packages (count exposed declarations from exposed modules as used)
+- [ ] Show more detail about usages (line/context)
+- [ ] Show unused parameters
+- [ ] Support whitelisting
+
 ## License
 
 See the `LICENSE` file.

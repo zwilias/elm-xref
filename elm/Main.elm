@@ -590,8 +590,35 @@ resolveImport iface expose =
         Exposing.FunctionExpose f ->
             [ f ]
 
+        Exposing.TypeExpose t ->
+            case t.constructors of
+                Nothing ->
+                    []
+
+                Just (Exposing.All _) ->
+                    resolveConstructors iface t.name
+
+                Just (Exposing.Explicit ctors) ->
+                    List.map Ranged.value ctors
+
         _ ->
             []
+
+
+resolveConstructors : Interface -> String -> List String
+resolveConstructors iface t =
+    case iface of
+        [] ->
+            []
+
+        (Interface.Type ( name, ctors )) :: rest ->
+            if name == t then
+                ctors
+            else
+                resolveConstructors rest t
+
+        _ :: rest ->
+            resolveConstructors rest t
 
 
 resolveInterface : Interface -> List String
@@ -608,6 +635,9 @@ resolveExposed exp =
         Interface.Operator i ->
             [ i.operator ]
 
+        Interface.Type ( _, ctors ) ->
+            ctors
+
         _ ->
             []
 
@@ -623,6 +653,9 @@ resolve decl =
 
         Declaration.Destructuring p _ ->
             patternToNames p
+
+        Declaration.TypeDecl { constructors } ->
+            List.map .name constructors
 
         _ ->
             []
@@ -897,9 +930,11 @@ defaultImports =
       , qualifier = [ "Maybe" ]
       , name = [ "Maybe" ]
       }
-    , { unqualified = []
+    , { unqualified = [ "Just", "Nothing" ]
       , qualified =
-            [ "map"
+            [ "Just"
+            , "Nothing"
+            , "map"
             , "map2"
             , "map3"
             , "map4"
@@ -913,9 +948,11 @@ defaultImports =
       , qualifier = [ "Result" ]
       , name = [ "Result" ]
       }
-    , { unqualified = []
+    , { unqualified = [ "Ok", "Err" ]
       , qualified =
-            [ "isEmpty"
+            [ "Ok"
+            , "Err"
+            , "isEmpty"
             , "length"
             , "reverse"
             , "repeat"
