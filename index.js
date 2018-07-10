@@ -47,7 +47,15 @@ function showUsages(usages) {
     console.log("");
     console.log("Usages:");
     usages.map(usage =>
-        console.log(" - " + usage[0].join(".") + "." + usage[1])
+        console.log(
+            " - " +
+                usage[0][0].join(".") +
+                "." +
+                usage[0][1] +
+                " (" +
+                usage[1].join(", ") +
+                ")"
+        )
     );
     console.log("");
 }

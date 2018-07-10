@@ -113,7 +113,7 @@ findUnused model =
     Set.diff allOwnFunctions usedFunctions
 
 
-walkGraph : Dict Function (Set Function) -> Function -> Set Function -> Set Function
+walkGraph : CallGraph -> Function -> Set Function -> Set Function
 walkGraph graph func acc =
     case Set.member func acc of
         True ->
@@ -121,8 +121,8 @@ walkGraph graph func acc =
 
         False ->
             Dict.get func graph
-                |> Maybe.withDefault Set.empty
-                |> Set.foldl (walkGraph graph) (Set.insert func acc)
+                |> Maybe.withDefault []
+                |> List.foldl (Tuple.second >> walkGraph graph) (Set.insert func acc)
 
 
 findOwnFunctions : Syntax.ModuleName -> Module -> Set Function -> Set Function
@@ -140,10 +140,29 @@ findOwnFunctions name modul acc =
                 (List.concatMap (Ranged.value >> resolve) m.declarations)
 
 
-findUsages : Function -> Dict Function (Set Function) -> List Function
+findUsages : Function -> CallGraph -> List ( Function, List Int )
 findUsages fun =
-    Dict.filter (always <| Set.member fun)
-        >> Dict.keys
+    Dict.foldr
+        (\f calls acc ->
+            let
+                filteredCalls =
+                    List.filterMap
+                        (\( line, calledF ) ->
+                            if calledF == fun then
+                                Just line
+                            else
+                                Nothing
+                        )
+                        calls
+            in
+            case filteredCalls of
+                [] ->
+                    acc
+
+                c ->
+                    ( f, c ) :: acc
+        )
+        []
 
 
 type alias Errors =
@@ -229,16 +248,16 @@ updateCallGraph usages model =
     { model | callGraph = List.foldl addCall model.callGraph usages }
 
 
-addCall : Usage -> Dict Function (Set Function) -> Dict Function (Set Function)
+addCall : Usage -> CallGraph -> CallGraph
 addCall { caller, callee } graph =
     Dict.update ( caller.modul, caller.fun )
         (\calls ->
             case calls of
                 Nothing ->
-                    Just <| Set.singleton ( callee.modul, callee.fun )
+                    Just <| [ ( caller.line + 1, ( callee.modul, callee.fun ) ) ]
 
                 Just c ->
-                    Just <| Set.insert ( callee.modul, callee.fun ) c
+                    Just <| ( caller.line + 1, ( callee.modul, callee.fun ) ) :: c
         )
         graph
 
@@ -764,7 +783,7 @@ port storeFile :
     -> Cmd msg
 
 
-port showUsages : List Function -> Cmd msg
+port showUsages : List ( Function, List Int ) -> Cmd msg
 
 
 store : InFile -> Encode.Value -> Cmd msg
@@ -780,8 +799,12 @@ type alias Model =
             }
     , done : Dict Syntax.ModuleName Module
     , entryPoints : Set Function
-    , callGraph : Dict Function (Set Function)
+    , callGraph : CallGraph
     }
+
+
+type alias CallGraph =
+    Dict Function (List ( Int, Function ))
 
 
 type Msg

@@ -41,12 +41,13 @@ to `False`) do very much count as usage.
 - [x] Show unused functions
 - [x] Find usages
 - [x] Support union type constructors
-- [ ] Support type aliases (as function and in type signatures)
-- [ ] Support effect modules
+- [x] Show more detail about usages (line/context)
 - [ ] Support packages (count exposed declarations from exposed modules as used)
-- [ ] Show more detail about usages (line/context)
-- [ ] Show unused parameters
+- [ ] Support effect modules
 - [ ] Support whitelisting
+- [ ] Show unused parameters
+- [ ] Support type aliases (as function and in type signatures)
+
 
 ## License
 
