@@ -117,44 +117,48 @@ function storeFile(fileInfo) {
         );
 }
 
-var excludeDirFilter = through2.obj(function(item, enc, next) {
-    if (!item.stats.isDirectory()) {
-        this.push(item);
-    }
-    next();
-});
-
-var excludeElmStuffFilter = through2.obj(function(item, enc, next) {
-    if (!item.path.includes("elm-stuff")) {
-        this.push(item);
-    }
-    next();
-});
-
-var excludeTestsFilter = through2.obj(function(item, enc, next) {
-    if (!item.path.includes("tests")) {
-        this.push(item);
-    }
-    next();
-});
-
-var onlyElmFilesFilter = through2.obj(function(item, enc, next) {
-    if (item.path.endsWith(".elm")) {
-        this.push(item);
-    }
-    next();
-});
-
 function findElmFiles(sourceDirectory) {
     return new Promise(function(resolve, reject) {
         var files = [];
+
+        var excludeDirFilter = through2.obj(function(item, enc, next) {
+            if (!item.stats.isDirectory()) {
+                this.push(item);
+            }
+            next();
+        });
+
+        var excludeElmStuffFilter = through2.obj(function(item, enc, next) {
+            if (!item.path.includes("elm-stuff")) {
+                this.push(item);
+            }
+            next();
+        });
+
+        var excludeTestsFilter = through2.obj(function(item, enc, next) {
+            if (!item.path.includes("tests")) {
+                this.push(item);
+            }
+            next();
+        });
+
+        var onlyElmFilesFilter = through2.obj(function(item, enc, next) {
+            if (item.path.endsWith(".elm")) {
+                this.push(item);
+            }
+            next();
+        });
 
         klaw(sourceDirectory)
             .pipe(excludeDirFilter)
             .pipe(excludeElmStuffFilter)
             .pipe(excludeTestsFilter)
             .pipe(onlyElmFilesFilter)
-            .on("data", fileName => files.push(fileName.path))
+            .on("data", fileName => {
+                if (files.indexOf(fileName.path) == -1) {
+                    files.push(fileName.path);
+                }
+            })
             .on("end", () => resolve(files));
     });
 }
