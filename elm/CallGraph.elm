@@ -1,16 +1,15 @@
-module CallGraph
-    exposing
-        ( CallGraph
-        , Caller
-        , Function
-        , Usage
-        , addCalls
-        , findUsages
-        , walkGraph
-        )
+module CallGraph exposing
+    ( CallGraph
+    , Caller
+    , Function
+    , Usage
+    , addCalls
+    , findUsages
+    , walkGraph
+    )
 
 import Dict exposing (Dict)
-import Elm.Syntax.Base as Base
+import Elm.Syntax.ModuleName exposing (ModuleName)
 import Set exposing (Set)
 
 
@@ -19,11 +18,11 @@ type alias CallGraph =
 
 
 type alias Function =
-    ( Base.ModuleName, String )
+    ( ModuleName, String )
 
 
 type alias Caller =
-    { modul : Base.ModuleName
+    { modul : ModuleName
     , fun : String
     , line : Int
     }
@@ -32,7 +31,7 @@ type alias Caller =
 type alias Usage =
     { caller : Caller
     , callee :
-        { modul : Base.ModuleName
+        { modul : ModuleName
         , fun : String
         }
     }
@@ -79,6 +78,7 @@ findUsages fun =
                         (\( line, calledF ) ->
                             if calledF == fun then
                                 Just line
+
                             else
                                 Nothing
                         )

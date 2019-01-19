@@ -1,11 +1,11 @@
 module Gather exposing (DeclDict, Scope, calls, defaultImports)
 
 import CallGraph exposing (Usage)
-import Elm.Syntax.Base as Base
 import Elm.Syntax.Declaration as Declaration exposing (Declaration)
 import Elm.Syntax.Expression as Expression exposing (Expression)
+import Elm.Syntax.ModuleName exposing (ModuleName)
+import Elm.Syntax.Node as Node exposing (Node)
 import Elm.Syntax.Pattern as Pattern exposing (Pattern)
-import Elm.Syntax.Ranged as Ranged exposing (Ranged)
 import Util
 
 
@@ -18,19 +18,19 @@ type alias DeclDict =
 
 
 type alias Scope =
-    { modul : Base.ModuleName
+    { modul : ModuleName
     , function : String
     , extra : List (List String)
     , available : List DeclDict
     }
 
 
-calls : Base.ModuleName -> List DeclDict -> List (Ranged Declaration) -> List Usage
+calls : ModuleName -> List DeclDict -> List (Node Declaration) -> List Usage
 calls name scope decls =
     let
         localScope : DeclDict
         localScope =
-            { unqualified = List.concatMap (Ranged.value >> Util.resolve) decls
+            { unqualified = List.concatMap (Node.value >> Util.resolve) decls
             , qualified = []
             , qualifier = []
             , name = name
@@ -44,13 +44,13 @@ calls name scope decls =
 
 
 gatherDeclarationCalls :
-    Base.ModuleName
+    ModuleName
     -> List DeclDict
-    -> Ranged Declaration
+    -> Node Declaration
     -> List Usage
     -> List Usage
 gatherDeclarationCalls name scope decl acc =
-    case Ranged.value decl of
+    case Node.value decl of
         Declaration.Destructuring pat expression ->
             -- NOTE: in 0.18, you can still destructure a complex expression,
             -- meaning that each usage would correspond to the definition of
@@ -58,22 +58,26 @@ gatherDeclarationCalls name scope decl acc =
             -- allow it anymore, so ignoring that use-case for now.
             acc
 
-        Declaration.FuncDecl { declaration } ->
+        Declaration.FunctionDeclaration { declaration } ->
+            let
+                declarationValue =
+                    Node.value declaration
+            in
             gatherExpression
                 { modul = name
-                , function = declaration.name.value
-                , extra = [ List.concatMap Util.patternToNames declaration.arguments ]
+                , function = Node.value declarationValue.name
+                , extra = [ List.concatMap Util.patternToNames declarationValue.arguments ]
                 , available = scope
                 }
-                declaration.expression
+                declarationValue.expression
                 acc
 
         _ ->
             acc
 
 
-gatherExpression : Scope -> Ranged Expression -> List Usage -> List Usage
-gatherExpression scope ( range, expr ) acc =
+gatherExpression : Scope -> Node Expression -> List Usage -> List Usage
+gatherExpression scope (Node.Node range expr) acc =
     case expr of
         Expression.UnitExpr ->
             acc
@@ -86,8 +90,11 @@ gatherExpression scope ( range, expr ) acc =
                 |> gatherExpression scope expr1
                 |> gatherExpression scope expr2
 
-        Expression.FunctionOrValue v ->
+        Expression.FunctionOrValue [] v ->
             register range.start.row v scope acc
+
+        Expression.FunctionOrValue qualifier v ->
+            registerQualified range.start.row qualifier v scope acc
 
         Expression.IfBlock cond ifExpr elseExpr ->
             acc
@@ -140,20 +147,17 @@ gatherExpression scope ( range, expr ) acc =
             gatherExpression lambdaScope expression acc
 
         Expression.RecordExpr setters ->
-            List.foldl (\( _, e ) -> gatherExpression scope e) acc setters
+            List.foldl (Node.value >> Tuple.second >> gatherExpression scope) acc setters
 
         Expression.ListExpr items ->
             List.foldl (gatherExpression scope) acc items
 
-        Expression.QualifiedExpr qualifier f ->
-            registerQualified range.start.row qualifier f scope acc
-
         Expression.RecordAccess record _ ->
             gatherExpression scope record acc
 
-        Expression.RecordUpdateExpression { name, updates } ->
-            List.foldl (\( _, e ) -> gatherExpression scope e)
-                (register range.start.row name scope acc)
+        Expression.RecordUpdateExpression name updates ->
+            List.foldl (Node.value >> Tuple.second >> gatherExpression scope)
+                (register range.start.row (Node.value name) scope acc)
                 updates
 
         _ ->
@@ -172,6 +176,7 @@ register line f scope acc =
     in
     if List.any (List.member f) scope.extra then
         acc
+
     else
         case find (exposed f) scope.available of
             Just decl ->
@@ -198,11 +203,12 @@ find pred l =
         x :: xs ->
             if pred x then
                 Just x
+
             else
                 find pred xs
 
 
-registerQualified : Int -> Base.ModuleName -> String -> Scope -> List Usage -> List Usage
+registerQualified : Int -> ModuleName -> String -> Scope -> List Usage -> List Usage
 registerQualified line qualifier f scope acc =
     case find (qualified qualifier f) scope.available of
         Just decl ->
@@ -222,39 +228,47 @@ registerQualified line qualifier f scope acc =
             acc
 
 
-qualified : Base.ModuleName -> String -> DeclDict -> Bool
+qualified : ModuleName -> String -> DeclDict -> Bool
 qualified qualifier f dict =
     dict.qualifier == qualifier && List.member f dict.qualified
 
 
-gatherCase : Scope -> ( Ranged Pattern, Ranged Expression ) -> List Usage -> List Usage
+gatherCase : Scope -> ( Node Pattern, Node Expression ) -> List Usage -> List Usage
 gatherCase scope ( pat, exp ) acc =
     gatherExpression { scope | extra = Util.patternToNames pat :: scope.extra } exp acc
 
 
-gatherLetDeclaration : Scope -> Ranged Expression.LetDeclaration -> List Usage -> List Usage
-gatherLetDeclaration scope ( _, decl ) acc =
+gatherLetDeclaration : Scope -> Node Expression.LetDeclaration -> List Usage -> List Usage
+gatherLetDeclaration scope (Node.Node _ decl) acc =
     case decl of
         Expression.LetFunction { declaration } ->
+            let
+                declarationValue =
+                    Node.value declaration
+            in
             gatherExpression
                 { scope
                     | extra =
                         List.concatMap Util.patternToNames
-                            declaration.arguments
+                            declarationValue.arguments
                             :: scope.extra
                 }
-                declaration.expression
+                declarationValue.expression
                 acc
 
         Expression.LetDestructuring _ e ->
             gatherExpression scope e acc
 
 
-gatherLetNames : Ranged Expression.LetDeclaration -> List String
-gatherLetNames ( _, decl ) =
+gatherLetNames : Node Expression.LetDeclaration -> List String
+gatherLetNames (Node.Node _ decl) =
     case decl of
         Expression.LetFunction f ->
-            [ f.declaration.name.value ]
+            [ f.declaration
+                |> Node.value
+                |> .name
+                |> Node.value
+            ]
 
         Expression.LetDestructuring p _ ->
             Util.patternToNames p
@@ -342,7 +356,7 @@ defaultImports =
       , qualifier = [ "Result" ]
       , name = [ "Result" ]
       }
-    , { unqualified = [ "Ok", "Err" ]
+    , { unqualified = []
       , qualified =
             [ "Ok"
             , "Err"
@@ -476,8 +490,5 @@ basicFunctions =
     , "(|>)"
     , "(<<)"
     , "(>>)"
-    , "flip"
-    , "curry"
-    , "uncurry"
     , "never"
     ]
