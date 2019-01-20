@@ -41,8 +41,8 @@ Unused functions:
  - /Users/ilias/Src/elm/elm-spa-example/src/Page/Settings.elm:456:1     Page.Settings.nothingIfEmpty
  - /Users/ilias/Src/elm/elm-spa-example/src/Route.elm:19:7      Route.Root
 
-# To find usages of `Maybe.map`:
-$ elm-xref Maybe.map
+# To find usages of `Maybe.Just`:
+$ elm-xref Maybe.Just
 Usages:
  - Api.storeCredWith (113)
  - Article.faveDecoder (231)
