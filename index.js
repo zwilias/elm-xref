@@ -2,12 +2,13 @@
 
 var Elm = require("./elm.js");
 var Promise = require("bluebird");
+var os = require("os");
 var fs = require("fs-extra");
 var klaw = require("klaw");
 var through2 = require("through2");
 var crypto = require("crypto");
 
-var app = Elm.Main.worker();
+var app = Elm.Elm.Main.init({});
 
 app.ports.toJS.subscribe(console.dir);
 app.ports.allUnused.subscribe(printUnused);
@@ -15,12 +16,13 @@ app.ports.storeFile.subscribe(storeFile);
 app.ports.showUsages.subscribe(showUsages);
 
 fs
-    .readFile("elm-package.json")
+    .readFile("elm.json")
     .then(data => JSON.parse(data))
     .then(info =>
-        Promise.map(Object.keys(info.dependencies), parsePackage).then(
-            () => info
-        )
+        Promise.map(
+            Object.entries(info.dependencies.direct),
+            parsePackage
+        ).then(() => info)
     )
     .then(info => Promise.map(info["source-directories"], parseSources))
     .then(() => {
@@ -32,7 +34,8 @@ fs
         } else {
             app.ports.fetch.send(null);
         }
-    });
+    })
+    .catch(console.error);
 
 function printUnused(unusedItems) {
     console.log("");
@@ -60,16 +63,13 @@ function showUsages(usages) {
     console.log("");
 }
 
-function parsePackage(packageName) {
-    console.log("Parsing dependency", packageName);
-    return parsePackageName(packageName)
-        .then(findVersion)
+function parsePackage(package) {
+    return parsePackageName(package)
         .then(findExposedModules)
         .then(pkg => Promise.map(pkg.modules, parsePackageModule(pkg)));
 }
 
 function parseSources(sourceDirectory) {
-    console.log("Parsing sources in", sourceDirectory);
     return findElmFiles(sourceDirectory).then(sources =>
         Promise.map(sources, parseSource)
     );
@@ -168,36 +168,30 @@ function parsePackageModule(pkg) {
     var pkgPath = basePath(pkg);
 
     return function(moduleName) {
-        var fileNames = pkg["source-directories"].map(
-            sourceDir => pkgPath + sourceDir + "/" + modulePath(moduleName)
-        );
+        var fileName = pkgPath + "src/" + modulePath(moduleName);
 
-        return Promise.any(
-            fileNames.map(name =>
-                fs.readFile(name).then(content =>
-                    readCache(hash(content))
-                        .then(data =>
-                            app.ports.restore.send({
-                                fileName: name,
-                                package: {
-                                    name: packageToName(pkg),
-                                    version: pkg.version
-                                },
-                                data
-                            })
-                        )
-                        .catch(() =>
-                            app.ports.toElm.send({
-                                package: {
-                                    name: packageToName(pkg),
-                                    version: pkg.version
-                                },
-                                fileName: name,
-                                content: content.toString()
-                            })
-                        )
+        return fs.readFile(fileName).then(content =>
+            readCache(hash(content))
+                .then(data =>
+                    app.ports.restore.send({
+                        fileName: name,
+                        package: {
+                            name: packageToName(pkg),
+                            version: pkg.version
+                        },
+                        data
+                    })
                 )
-            )
+                .catch(() =>
+                    app.ports.toElm.send({
+                        package: {
+                            name: packageToName(pkg),
+                            version: pkg.version
+                        },
+                        fileName: fileName,
+                        content: content.toString()
+                    })
+                )
         );
     };
 }
@@ -206,35 +200,24 @@ function modulePath(name) {
     return name.split(".").join("/") + ".elm";
 }
 
-function parsePackageName(name) {
+function parsePackageName(package) {
+    var name = package[0];
     var parts = name.split("/");
     if (parts.length == 2) {
-        return Promise.resolve({ author: parts[0], name: parts[1] });
+        return Promise.resolve({
+            author: parts[0],
+            name: parts[1],
+            version: package[1]
+        });
     } else {
         return Promise.reject("failed to parse " + name);
     }
 }
 
-function findVersion(pkg) {
-    var versionsPath = "elm-stuff/packages/" + pkg.author + "/" + pkg.name;
-
-    return fs
-        .readdir(versionsPath)
-        .then(data => data.filter(v => !(v == "." || v == "..")))
-        .then(versions => {
-            if (versions.length !== 1) {
-                return Promise.reject(
-                    "Found multiple candidate versions for " +
-                        packageToName(pkg)
-                );
-            } else {
-                return Object.assign({}, pkg, { version: versions[0] });
-            }
-        });
-}
 function basePath(pkg) {
     return (
-        "elm-stuff/packages/" +
+        os.homedir() +
+        "/.elm/0.19.0/package/" +
         pkg.author +
         "/" +
         pkg.name +
@@ -245,11 +228,20 @@ function basePath(pkg) {
 }
 
 function findExposedModules(pkg) {
-    return fs.readFile(basePath(pkg) + "elm-package.json").then(data => {
+    return fs.readFile(basePath(pkg) + "elm.json").then(data => {
         var info = JSON.parse(data);
+        var modules;
+        if (Array.isArray(info["exposed-modules"])) {
+            modules = info["exposed-modules"];
+        } else {
+            modules = Object.values(info["exposed-modules"]).reduce(
+                (acc, ms) => acc.concat(ms),
+                []
+            );
+        }
+
         return Object.assign({}, pkg, {
-            "source-directories": info["source-directories"],
-            modules: info["exposed-modules"]
+            modules: modules
         });
     });
 }

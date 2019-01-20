@@ -3,19 +3,19 @@ port module Main exposing (main, toElm, toJS)
 import CallGraph exposing (CallGraph, Caller, Function, Usage)
 import Dict exposing (Dict)
 import Elm.Interface as Interface exposing (Interface)
-import Elm.Json.Decode as RawFile
-import Elm.Json.Encode as RawFile
 import Elm.Parser as Parser
 import Elm.Processing as Processing
 import Elm.RawFile as RawFile exposing (RawFile)
-import Elm.Syntax.Base as Syntax
 import Elm.Syntax.Declaration as Declaration exposing (Declaration)
 import Elm.Syntax.Exposing as Exposing
-import Elm.Syntax.Module as Module exposing (Import)
-import Elm.Syntax.Ranged as Ranged exposing (Ranged)
+import Elm.Syntax.Import exposing (Import)
+import Elm.Syntax.Module as Module
+import Elm.Syntax.ModuleName exposing (ModuleName)
+import Elm.Syntax.Node as Node exposing (Node)
 import Gather
 import Json.Decode as Decode
 import Json.Encode as Encode
+import Parser
 import Set exposing (Set)
 import Util
 
@@ -46,7 +46,7 @@ type Module
 
 
 type alias PackageData =
-    { name : Syntax.ModuleName
+    { name : ModuleName
     , fileName : String
     , interface : Interface
     , package : PackageIdentifier
@@ -54,11 +54,11 @@ type alias PackageData =
 
 
 type alias ModuleData =
-    { name : Syntax.ModuleName
+    { name : ModuleName
     , fileName : String
     , interface : Interface
     , imports : List Import
-    , declarations : List (Ranged Declaration)
+    , declarations : List (Node Declaration)
     }
 
 
@@ -78,7 +78,7 @@ findUnused model =
     Set.diff allOwnFunctions usedFunctions
 
 
-findOwnFunctions : Syntax.ModuleName -> Module -> Set Function -> Set Function
+findOwnFunctions : ModuleName -> Module -> Set Function -> Set Function
 findOwnFunctions name modul acc =
     case modul of
         Package _ ->
@@ -90,11 +90,7 @@ findOwnFunctions name modul acc =
                     Set.insert ( name, f ) fs
                 )
                 acc
-                (List.concatMap (Ranged.value >> Util.resolve) m.declarations)
-
-
-type alias Errors =
-    List String
+                (List.concatMap (Node.value >> Util.resolve) m.declarations)
 
 
 add : Module -> Model -> Model
@@ -110,7 +106,7 @@ add mod model =
                 |> checkTodo Set.empty
 
 
-todoItem : ModuleData -> Model -> { blockedBy : Set Syntax.ModuleName, data : ModuleData }
+todoItem : ModuleData -> Model -> { blockedBy : Set ModuleName, data : ModuleData }
 todoItem modul model =
     { blockedBy = requiredModules modul model
     , data = modul
@@ -132,10 +128,10 @@ findEntryPoints modul model =
             model
 
 
-checkTodo : Set Syntax.ModuleName -> Model -> Model
+checkTodo : Set ModuleName -> Model -> Model
 checkTodo nowDone model =
     let
-        ( newlyDone, newTodo, usages ) =
+        ( newlyDone, newTodo, registeredUsages ) =
             List.foldl
                 (\{ blockedBy, data } ( done, todo, usages ) ->
                     let
@@ -147,6 +143,7 @@ checkTodo nowDone model =
                         , todo
                         , finalize model data :: usages
                         )
+
                     else
                         ( done
                         , { blockedBy = newBlockers, data = data } :: todo
@@ -167,7 +164,7 @@ checkTodo nowDone model =
             newModel
 
         _ ->
-            List.foldl updateCallGraph newModel usages
+            List.foldl updateCallGraph newModel registeredUsages
                 |> checkTodo (Dict.keys newDone |> Set.fromList)
 
 
@@ -200,12 +197,12 @@ interface mod =
             m.interface
 
 
-declImportDict : Dict Syntax.ModuleName Module -> Module.Import -> Gather.DeclDict
+declImportDict : Dict ModuleName Module -> Import -> Gather.DeclDict
 declImportDict modules imports =
     let
         iface : Interface
         iface =
-            Dict.get imports.moduleName modules
+            Dict.get (Node.value imports.moduleName) modules
                 |> Maybe.map interface
                 |> Maybe.withDefault []
 
@@ -220,28 +217,31 @@ declImportDict modules imports =
             , qualifier =
                 imports.moduleAlias
                     |> Maybe.withDefault imports.moduleName
-            , name = imports.moduleName
+                    |> Node.value
+            , name = Node.value imports.moduleName
             }
 
-        Just (Exposing.All _) ->
+        Just (Node.Node _ (Exposing.All _)) ->
             { unqualified = allExports
             , qualified = allExports
             , qualifier =
                 imports.moduleAlias
                     |> Maybe.withDefault imports.moduleName
-            , name = imports.moduleName
+                    |> Node.value
+            , name = Node.value imports.moduleName
             }
 
-        Just (Exposing.Explicit list) ->
+        Just (Node.Node _ (Exposing.Explicit list)) ->
             { unqualified =
                 List.concatMap
-                    (Ranged.value >> resolveImport iface)
+                    (Node.value >> resolveImport iface)
                     list
             , qualified = allExports
             , qualifier =
                 imports.moduleAlias
                     |> Maybe.withDefault imports.moduleName
-            , name = imports.moduleName
+                    |> Node.value
+            , name = Node.value imports.moduleName
             }
 
 
@@ -258,15 +258,12 @@ resolveImport iface expose =
             [ f ]
 
         Exposing.TypeExpose t ->
-            case t.constructors of
+            case t.open of
                 Nothing ->
                     []
 
-                Just (Exposing.All _) ->
+                Just _ ->
                     resolveConstructors iface t.name
-
-                Just (Exposing.Explicit ctors) ->
-                    List.map Ranged.value ctors
 
         _ ->
             []
@@ -278,9 +275,10 @@ resolveConstructors iface t =
         [] ->
             []
 
-        (Interface.Type ( name, ctors )) :: rest ->
+        (Interface.CustomType ( name, ctors )) :: rest ->
             if name == t then
                 ctors
+
             else
                 resolveConstructors rest t
 
@@ -300,38 +298,38 @@ resolveExposed exp =
             [ s ]
 
         Interface.Operator i ->
-            [ i.operator ]
+            [ Node.value i.operator ]
 
-        Interface.Type ( _, ctors ) ->
+        Interface.CustomType ( _, ctors ) ->
             ctors
 
         _ ->
             []
 
 
-requiredModules : ModuleData -> Model -> Set Syntax.ModuleName
+requiredModules : ModuleData -> Model -> Set ModuleName
 requiredModules modul model =
     let
         needed =
-            List.map .moduleName modul.imports
+            List.map (.moduleName >> Node.value) modul.imports
                 |> List.filter (not << isNative)
                 |> Set.fromList
     in
     Set.diff needed (availableModules model)
 
 
-isNative : Syntax.ModuleName -> Bool
+isNative : ModuleName -> Bool
 isNative =
     List.head >> Maybe.map ((==) "Native") >> Maybe.withDefault False
 
 
-availableModules : Model -> Set Syntax.ModuleName
+availableModules : Model -> Set ModuleName
 availableModules model =
     Dict.keys model.done
         |> Set.fromList
 
 
-parse : InFile -> Result Errors ( Module, Encode.Value )
+parse : InFile -> Result String ( Module, Encode.Value )
 parse file =
     Parser.parse file.content
         |> Result.map
@@ -340,12 +338,14 @@ parse file =
                 , RawFile.encode rawFile
                 )
             )
+        |> Result.mapError Parser.deadEndsToString
 
 
 parseCached : CachedFile -> Result String Module
 parseCached cached =
-    Decode.decodeValue RawFile.decode cached.data
+    Decode.decodeValue RawFile.decoder cached.data
         |> Result.map (toModule cached.package cached.fileName)
+        |> Result.mapError Decode.errorToString
 
 
 toModule : Maybe PackageIdentifier -> String -> RawFile -> Module
@@ -361,7 +361,7 @@ toModule package fileName rawFile =
 toPackageModule : PackageIdentifier -> String -> RawFile -> Module
 toPackageModule package fileName rawFile =
     Package
-        { name = RawFile.moduleName rawFile |> Maybe.withDefault []
+        { name = RawFile.moduleName rawFile
         , fileName = fileName
         , interface = Interface.build rawFile
         , package = package
@@ -375,10 +375,10 @@ toInternalModule fileName rawFile =
             Processing.process Processing.init rawFile
     in
     Own
-        { name = RawFile.moduleName rawFile |> Maybe.withDefault []
+        { name = RawFile.moduleName rawFile
         , fileName = fileName
         , interface = Interface.build rawFile
-        , imports = file.imports
+        , imports = List.map Node.value file.imports
         , declarations = file.declarations
         }
 
@@ -423,10 +423,10 @@ store file data =
 type alias Model =
     { todo :
         List
-            { blockedBy : Set Syntax.ModuleName
+            { blockedBy : Set ModuleName
             , data : ModuleData
             }
-    , done : Dict Syntax.ModuleName Module
+    , done : Dict ModuleName Module
     , entryPoints : Set Function
     , callGraph : CallGraph
     }
@@ -462,7 +462,7 @@ update msg model =
 
                 Err e ->
                     ( model
-                    , toJS <| Encode.string <| file.fileName ++ ": " ++ toString e
+                    , toJS <| Encode.string <| file.fileName ++ ": " ++ e
                     )
 
         Restore cached ->
@@ -475,7 +475,7 @@ update msg model =
                 Err e ->
                     ( model
                     , Cmd.batch
-                        [ toJS <| Encode.string <| toString e
+                        [ toJS <| Encode.string e
                         , toJS <| Encode.string cached.fileName
                         ]
                     )
@@ -501,10 +501,10 @@ subscriptions =
         ]
 
 
-main : Program Never Model Msg
+main : Program () Model Msg
 main =
-    Platform.program
-        { init = init
+    Platform.worker
+        { init = always init
         , update = update
         , subscriptions = always subscriptions
         }
