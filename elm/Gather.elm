@@ -317,7 +317,6 @@ defaultImports =
             , "minimum"
             , "all"
             , "any"
-            , "scanl"
             , "sort"
             , "sortBy"
             , "sortWith"
@@ -325,9 +324,11 @@ defaultImports =
       , qualifier = [ "List" ]
       , name = [ "List" ]
       }
-    , { unqualified = []
+    , { unqualified = [ "Just", "Nothing" ]
       , qualified =
-            [ "withDefault"
+            [ "Just"
+            , "Nothing"
+            , "withDefault"
             , "map"
             , "map2"
             , "map3"
@@ -338,7 +339,7 @@ defaultImports =
       , qualifier = [ "Maybe" ]
       , name = [ "Maybe" ]
       }
-    , { unqualified = [ "Just", "Nothing" ]
+    , { unqualified = [ "Ok", "Err" ]
       , qualified =
             [ "Just"
             , "Nothing"
@@ -358,15 +359,11 @@ defaultImports =
       }
     , { unqualified = []
       , qualified =
-            [ "Ok"
-            , "Err"
-            , "isEmpty"
+            [ "isEmpty"
             , "length"
             , "reverse"
             , "repeat"
-            , "cons"
-            , "uncons"
-            , "fromChar"
+            , "replace"
             , "append"
             , "concat"
             , "split"
@@ -384,9 +381,14 @@ defaultImports =
             , "indexes"
             , "indices"
             , "toInt"
+            , "fromInt"
             , "toFloat"
+            , "fromFloat"
+            , "fromChar"
+            , "cons"
+            , "uncons"
             , "toList"
-            , "fromList"
+            , "fromLst"
             , "toUpper"
             , "toLower"
             , "pad"
@@ -397,7 +399,7 @@ defaultImports =
             , "trimRight"
             , "map"
             , "filter"
-            , "foldr"
+            , "foldl"
             , "foldr"
             , "any"
             , "all"
@@ -406,22 +408,22 @@ defaultImports =
       , name = [ "String" ]
       }
     , { unqualified = []
-      , qualified = [ "first", "second", "mapFirst", "mapSecond" ]
+      , qualified = [ "pair", "first", "second", "mapFirst", "mapSecond", "mapBoth" ]
       , qualifier = [ "Tuple" ]
       , name = [ "Tuple" ]
       }
     , { unqualified = []
-      , qualified = [ "log", "crash" ]
+      , qualified = [ "toString", "log", "todo" ]
       , qualifier = [ "Debug" ]
       , name = [ "Debug" ]
       }
     , { unqualified = []
-      , qualified = [ "program", "programWithFlags", "sendToApp", "sendToSelf" ]
+      , qualified = [ "worker", "sendToApp", "sendToSelf" ]
       , qualifier = [ "Platform" ]
       , name = [ "Platform" ]
       }
-    , { unqualified = [ "(!)" ]
-      , qualified = [ "(!)", "map", "batch", "none" ]
+    , { unqualified = []
+      , qualified = [ "map", "batch", "none" ]
       , qualifier = [ "Cmd" ]
       , name = [ "Platform", "Cmd" ]
       }
@@ -454,8 +456,8 @@ basicFunctions =
     , "(/)"
     , "(^)"
     , "(//)"
-    , "rem"
-    , "(%)"
+    , "remainderBy"
+    , "modBy"
     , "negate"
     , "abs"
     , "sqrt"
@@ -482,7 +484,6 @@ basicFunctions =
     , "fromPolar"
     , "isNaN"
     , "isInfinite"
-    , "toString"
     , "(++)"
     , "identity"
     , "always"
