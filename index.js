@@ -22,10 +22,7 @@ fs
         Promise.map(
             Object.entries(info.dependencies.direct),
             parsePackage
-        ).then(() => {
-            console.log("done with deps");
-            return info;
-        })
+        ).then(() => info)
     )
     .then(info => Promise.map(info["source-directories"], parseSources))
     .then(() => {
@@ -67,14 +64,12 @@ function showUsages(usages) {
 }
 
 function parsePackage(package) {
-    console.log("Parsing dependency", package);
     return parsePackageName(package)
         .then(findExposedModules)
         .then(pkg => Promise.map(pkg.modules, parsePackageModule(pkg)));
 }
 
 function parseSources(sourceDirectory) {
-    console.log("Parsing sources in", sourceDirectory);
     return findElmFiles(sourceDirectory).then(sources =>
         Promise.map(sources, parseSource)
     );
@@ -233,7 +228,6 @@ function basePath(pkg) {
 }
 
 function findExposedModules(pkg) {
-    console.log("Finding exposed modules", pkg);
     return fs.readFile(basePath(pkg) + "elm.json").then(data => {
         var info = JSON.parse(data);
         var modules;
@@ -246,7 +240,6 @@ function findExposedModules(pkg) {
             );
         }
 
-        console.log("Found modules", modules);
         return Object.assign({}, pkg, {
             modules: modules
         });
