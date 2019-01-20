@@ -12,6 +12,7 @@ import Elm.Syntax.Import exposing (Import)
 import Elm.Syntax.Module as Module
 import Elm.Syntax.ModuleName exposing (ModuleName)
 import Elm.Syntax.Node as Node exposing (Node)
+import Elm.Syntax.Range exposing (Location)
 import Gather
 import Json.Decode as Decode
 import Json.Encode as Encode
@@ -62,7 +63,7 @@ type alias ModuleData =
     }
 
 
-findUnused : Model -> Set Function
+findUnused : Model -> Dict Function ( String, Location )
 findUnused model =
     let
         usedFunctions : Set Function
@@ -71,26 +72,31 @@ findUnused model =
                 Set.empty
                 model.entryPoints
 
-        allOwnFunctions : Set Function
+        allOwnFunctions : Dict Function ( String, Location )
         allOwnFunctions =
-            Dict.foldl findOwnFunctions Set.empty model.done
+            Dict.foldl findOwnFunctions Dict.empty model.done
     in
-    Set.diff allOwnFunctions usedFunctions
+    Set.foldl Dict.remove allOwnFunctions usedFunctions
 
 
-findOwnFunctions : ModuleName -> Module -> Set Function -> Set Function
+findOwnFunctions :
+    ModuleName
+    -> Module
+    -> Dict Function ( String, Location )
+    -> Dict Function ( String, Location )
 findOwnFunctions name modul acc =
     case modul of
         Package _ ->
             acc
 
         Own m ->
-            List.foldl
-                (\f fs ->
-                    Set.insert ( name, f ) fs
-                )
-                acc
-                (List.concatMap (Node.value >> Util.resolve) m.declarations)
+            m.declarations
+                |> List.concatMap (Node.value >> Util.resolveNodes)
+                |> List.foldl
+                    (\(Node.Node range f) fs ->
+                        Dict.insert ( name, f ) ( m.fileName, range.start ) fs
+                    )
+                    acc
 
 
 add : Module -> Model -> Model
@@ -396,7 +402,7 @@ port restore : (CachedFile -> msg) -> Sub msg
 port toJS : Encode.Value -> Cmd msg
 
 
-port allUnused : List Function -> Cmd msg
+port allUnused : List ( Function, ( String, Location ) ) -> Cmd msg
 
 
 port fetch : (() -> msg) -> Sub msg
@@ -482,7 +488,7 @@ update msg model =
 
         Send ->
             ( model
-            , allUnused <| Set.toList <| findUnused model
+            , allUnused <| Dict.toList <| findUnused model
             )
 
         Check fun ->

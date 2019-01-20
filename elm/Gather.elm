@@ -30,7 +30,7 @@ calls name scope decls =
     let
         localScope : DeclDict
         localScope =
-            { unqualified = List.concatMap (Node.value >> Util.resolve) decls
+            { unqualified = List.concatMap (Node.value >> Util.resolveNames) decls
             , qualified = []
             , qualifier = []
             , name = name

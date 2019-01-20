@@ -75,7 +75,18 @@ function printUnused(unusedItems) {
     } else {
         console.log("Unused functions:");
         unusedItems.map(unused =>
-            console.log(" - " + unused[0].join(".") + "." + unused[1])
+            console.log(
+                " - " +
+                    unused[1][0] +
+                    ":" +
+                    unused[1][1].row +
+                    ":" +
+                    unused[1][1].column +
+                    "\t" +
+                    unused[0][0].join(".") +
+                    "." +
+                    unused[0][1]
+            )
         );
         process.exit(1);
     }

@@ -1,59 +1,68 @@
-module Util exposing (patternToNames, resolve)
+module Util exposing (patternToNames, patternToNodes, resolveNames, resolveNodes)
 
 import Elm.Syntax.Declaration as Declaration exposing (Declaration)
 import Elm.Syntax.Node as Node exposing (Node)
 import Elm.Syntax.Pattern as Pattern exposing (Pattern)
 
 
-resolve : Declaration -> List String
-resolve decl =
+resolveNames : Declaration -> List String
+resolveNames =
+    resolveNodes >> List.map Node.value
+
+
+resolveNodes : Declaration -> List (Node String)
+resolveNodes decl =
     case decl of
         Declaration.FunctionDeclaration f ->
             [ f.declaration
                 |> Node.value
                 |> .name
-                |> Node.value
             ]
 
         Declaration.PortDeclaration p ->
-            [ Node.value p.name ]
+            [ p.name ]
 
         Declaration.Destructuring p _ ->
-            patternToNames p
+            patternToNodes p
 
         Declaration.CustomTypeDeclaration { constructors } ->
-            List.map (Node.value >> .name >> Node.value) constructors
+            List.map (Node.value >> .name) constructors
 
         _ ->
             []
 
 
 patternToNames : Node Pattern -> List String
-patternToNames pat =
+patternToNames =
+    patternToNodes >> List.map Node.value
+
+
+patternToNodes : Node Pattern -> List (Node String)
+patternToNodes pat =
     case Node.value pat of
         Pattern.TuplePattern p ->
-            List.concatMap patternToNames p
+            List.concatMap patternToNodes p
 
         Pattern.RecordPattern p ->
-            List.map Node.value p
+            p
 
         Pattern.UnConsPattern h t ->
-            patternToNames h ++ patternToNames t
+            patternToNodes h ++ patternToNodes t
 
         Pattern.ListPattern l ->
-            List.concatMap patternToNames l
+            List.concatMap patternToNodes l
 
         Pattern.VarPattern s ->
-            [ s ]
+            [ Node.Node (Node.range pat) s ]
 
         Pattern.NamedPattern _ p ->
-            List.concatMap patternToNames p
+            List.concatMap patternToNodes p
 
         Pattern.AsPattern p n ->
-            Node.value n :: patternToNames p
+            n :: patternToNodes p
 
         Pattern.ParenthesizedPattern p ->
-            patternToNames p
+            patternToNodes p
 
         _ ->
             []
