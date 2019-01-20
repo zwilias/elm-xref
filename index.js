@@ -15,16 +15,7 @@ app.ports.allUnused.subscribe(printUnused);
 app.ports.storeFile.subscribe(storeFile);
 app.ports.showUsages.subscribe(showUsages);
 
-fs
-    .readFile("elm.json")
-    .then(data => JSON.parse(data))
-    .then(info =>
-        Promise.map(
-            Object.entries(info.dependencies.direct),
-            parsePackage
-        ).then(() => info)
-    )
-    .then(info => Promise.map(info["source-directories"], parseSources))
+parseProject()
     .then(() => {
         if (process.argv.length > 2) {
             var mod = process.argv[2].split(".");
@@ -36,6 +27,19 @@ fs
         }
     })
     .catch(console.error);
+
+function parseProject() {
+    return fs
+        .readFile("elm.json")
+        .then(data => JSON.parse(data))
+        .then(info =>
+            Promise.map(
+                Object.entries(info.dependencies.direct),
+                parsePackage
+            ).then(() => info)
+        )
+        .then(info => Promise.map(info["source-directories"], parseSources));
+}
 
 function printUnused(unusedItems) {
     console.log("");
@@ -168,7 +172,7 @@ function parsePackageModule(pkg) {
     var pkgPath = basePath(pkg);
 
     return function(moduleName) {
-        var fileName = pkgPath + "src/" + modulePath(moduleName);
+        var fileName = path.join(pkgPath, "src", modulePath(moduleName));
 
         return fs.readFile(fileName).then(content =>
             readCache(hash(content))
@@ -214,23 +218,28 @@ function parsePackageName(package) {
     }
 }
 
+function elmHomeDir() {
+    if (process.env.ELM_HOME) {
+        return path.normalize(process.env.ELM_HOME);
+    } else {
+        return path.join(os.homedir(), ".elm");
+    }
+}
+
+function packagesRoot() {
+    return path.join(elmHomDir(), "0.19.0", "package");
+}
+
 function basePath(pkg) {
-    return (
-        os.homedir() +
-        "/.elm/0.19.0/package/" +
-        pkg.author +
-        "/" +
-        pkg.name +
-        "/" +
-        pkg.version +
-        "/"
-    );
+    return path.join(packagesRoot(), pkg.author, pkg.name, pkg.version);
 }
 
 function findExposedModules(pkg) {
-    return fs.readFile(basePath(pkg) + "elm.json").then(data => {
+    var elmJson = path.join(basePath(pkg), "elm.json");
+    return fs.readFile(elmJson).then(data => {
         var info = JSON.parse(data);
         var modules;
+
         if (Array.isArray(info["exposed-modules"])) {
             modules = info["exposed-modules"];
         } else {
