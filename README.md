@@ -43,7 +43,6 @@ to `False`) do very much count as usage.
 - [x] Support union type constructors
 - [x] Show more detail about usages (line/context)
 - [ ] Support packages (count exposed declarations from exposed modules as used)
-- [ ] Support effect modules
 - [ ] Support whitelisting
 - [ ] Show unused parameters
 - [ ] Support type aliases (as function and in type signatures)
