@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 
-var Elm = require("./elm.js");
-var Promise = require("bluebird");
-var os = require("os");
-var fs = require("fs-extra");
-var klaw = require("klaw");
-var through2 = require("through2");
-var crypto = require("crypto");
+var Elm = require("./elm.js"),
+    Promise = require("bluebird"),
+    os = require("os"),
+    fs = require("fs-extra"),
+    path = require("path"),
+    klaw = require("klaw"),
+    through2 = require("through2"),
+    crypto = require("crypto");
 
 var app = Elm.Elm.Main.init({});
 
@@ -15,18 +16,44 @@ app.ports.allUnused.subscribe(printUnused);
 app.ports.storeFile.subscribe(storeFile);
 app.ports.showUsages.subscribe(showUsages);
 
-parseProject()
-    .then(() => {
-        if (process.argv.length > 2) {
-            var mod = process.argv[2].split(".");
-            var fun = mod.pop();
+if (process.argv.length > 2) {
+    var arg = process.argv[2];
+    if (arg == "--help" || arg == "-h") {
+        showUsage();
+    } else {
+        findUsages(arg);
+    }
+} else {
+    findUnused();
+}
 
-            app.ports.check.send([mod, fun]);
-        } else {
-            app.ports.fetch.send(null);
-        }
-    })
-    .catch(console.error);
+function showUsage() {
+    console.log("Usage:");
+    console.log("");
+    console.log("    elm-xref");
+    console.log("        Find unused functions");
+    console.log("");
+    console.log("    elm-xref Some.Module.function");
+    console.log(
+        "        Find where a function (or custom type constructor) is used"
+    );
+    console.log("");
+}
+
+function findUnused() {
+    parseProject()
+        .then(() => app.ports.fetch.send(null))
+        .catch(console.error);
+}
+
+function findUsages(qualifiedFun) {
+    var mod = qualifiedFun.split(".");
+    var fun = mod.pop();
+
+    parseProject()
+        .then(() => app.ports.check.send([mod, fun]))
+        .catch(console.error);
+}
 
 function parseProject() {
     return fs
@@ -42,12 +69,16 @@ function parseProject() {
 }
 
 function printUnused(unusedItems) {
-    console.log("");
-    console.log("Unused functions:");
-    unusedItems.map(unused =>
-        console.log(" - " + unused[0].join(".") + "." + unused[1])
-    );
-    console.log("");
+    if (unusedItems.length == 0) {
+        console.log("No unused functions or custom type constructors found!");
+        process.exit(0);
+    } else {
+        console.log("Unused functions:");
+        unusedItems.map(unused =>
+            console.log(" - " + unused[0].join(".") + "." + unused[1])
+        );
+        process.exit(1);
+    }
 }
 
 function showUsages(usages) {
@@ -227,7 +258,7 @@ function elmHomeDir() {
 }
 
 function packagesRoot() {
-    return path.join(elmHomDir(), "0.19.0", "package");
+    return path.join(elmHomeDir(), "0.19.0", "package");
 }
 
 function basePath(pkg) {
