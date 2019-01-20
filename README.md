@@ -80,7 +80,7 @@ to `False`) do very much count as usage.
 - [ ] Support whitelisting
 - [ ] Show unused parameters
 - [ ] Support type aliases (as function and in type signatures)
-- [ ] Show file/line(/col?) links for usages and definitions
+- [x] Show file/line(/col?) links for usages and definitions
 
 
 ## License
