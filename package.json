@@ -1,7 +1,8 @@
 {
     "name": "elm-xref",
-    "version": "0.2.2",
-    "description": "Cross referencing tool for Elm - find usages and unused code",
+    "version": "0.3.0",
+    "description":
+        "Cross referencing tool for Elm - find usages and unused code",
     "main": "index.js",
     "author": "Ilias Van Peer",
     "license": "BSD-3-Clause",
@@ -23,8 +24,5 @@
         "elm": "elm make --optimize elm/Main.elm --output elm.js",
         "prepublishOnly": "npm run elm"
     },
-    "files": [
-        "index.js",
-        "elm.js"
-    ]
+    "files": ["index.js", "elm.js"]
 }
