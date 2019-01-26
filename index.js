@@ -6,15 +6,9 @@ var Elm = require("./elm.js"),
     fs = require("fs-extra"),
     path = require("path"),
     klaw = require("klaw"),
+    semverSort = require("semver-sort"),
     through2 = require("through2"),
     crypto = require("crypto");
-
-var app = Elm.Elm.Main.init({});
-
-app.ports.toJS.subscribe(console.dir);
-app.ports.allUnused.subscribe(printUnused);
-app.ports.storeFile.subscribe(storeFile);
-app.ports.showUsages.subscribe(showUsages);
 
 if (process.argv.length > 2) {
     var arg = process.argv[2];
@@ -40,9 +34,20 @@ function showUsage() {
     console.log("");
 }
 
+function initElm(args = []) {
+    var app = Elm.Elm.Main.init({ flags: args });
+
+    app.ports.toJS.subscribe(console.dir);
+    app.ports.allUnused.subscribe(printUnused);
+    app.ports.storeFile.subscribe(storeFile);
+    app.ports.showUsages.subscribe(showUsages);
+
+    return app;
+}
+
 function findUnused() {
     parseProject()
-        .then(() => app.ports.fetch.send(null))
+        .then(app => app.ports.fetch.send(null))
         .catch(console.error);
 }
 
@@ -51,7 +56,7 @@ function findUsages(qualifiedFun) {
     var fun = mod.pop();
 
     parseProject()
-        .then(() => app.ports.check.send([mod, fun]))
+        .then(app => app.ports.check.send([mod, fun]))
         .catch(console.error);
 }
 
@@ -59,13 +64,33 @@ function parseProject() {
     return fs
         .readFile("elm.json")
         .then(data => JSON.parse(data))
-        .then(info =>
-            Promise.map(
-                Object.entries(info.dependencies.direct),
-                parsePackage
-            ).then(() => info)
-        )
-        .then(info => Promise.map(info["source-directories"], parseSources));
+        .then(info => {
+            switch (info.type) {
+                case "application":
+                    return parseApplicationProject(info);
+                case "package":
+                    return parsePackageProject(info);
+                default:
+                    return Promise.reject("Unknown package type: " + info.type);
+            }
+        });
+}
+
+function parseApplicationProject(info) {
+    var app = initElm();
+    return Promise.map(
+        Object.entries(info.dependencies.direct),
+        parseAppPackage(app)
+    )
+        .then(() => Promise.map(info["source-directories"], parseSources(app)))
+        .then(() => app);
+}
+
+function parsePackageProject(info) {
+    var app = initElm(extractExposedModules(info));
+    return Promise.map(Object.keys(info.dependencies), parsePackagePackage(app))
+        .then(() => parseSources(app)("src"))
+        .then(() => app);
 }
 
 function printUnused(unusedItems) {
@@ -93,7 +118,6 @@ function printUnused(unusedItems) {
 }
 
 function showUsages(usages) {
-    console.log("");
     console.log("Usages:");
     usages.map(usage =>
         console.log(
@@ -106,39 +130,56 @@ function showUsages(usages) {
                 ")"
         )
     );
-    console.log("");
 }
 
-function parsePackage(package) {
-    return parsePackageName(package)
-        .then(findExposedModules)
-        .then(pkg => Promise.map(pkg.modules, parsePackageModule(pkg)));
+function parseAppPackage(app) {
+    return function(pkg) {
+        return parsePackageName(pkg)
+            .then(findExposedModules)
+            .then(pkg =>
+                Promise.map(pkg.modules, parsePackageModule(app, pkg))
+            );
+    };
 }
 
-function parseSources(sourceDirectory) {
-    return findElmFiles(sourceDirectory).then(sources =>
-        Promise.map(sources, parseSource)
-    );
+function parsePackagePackage(app) {
+    return function(packageName) {
+        return resolvePackageVersion(packageName)
+            .then(findExposedModules)
+            .then(pkg =>
+                Promise.map(pkg.modules, parsePackageModule(app, pkg))
+            );
+    };
 }
 
-function parseSource(modulePath) {
-    return fs.readFile(modulePath).then(data =>
-        readCache(hash(data))
-            .then(cachedData =>
-                app.ports.restore.send({
-                    fileName: modulePath,
-                    package: null,
-                    data: cachedData
-                })
-            )
-            .catch(() =>
-                app.ports.toElm.send({
-                    fileName: modulePath,
-                    content: data.toString(),
-                    package: null
-                })
-            )
-    );
+function parseSources(app) {
+    return function(sourceDirectory) {
+        return findElmFiles(sourceDirectory).then(sources =>
+            Promise.map(sources, parseSource(app))
+        );
+    };
+}
+
+function parseSource(app) {
+    return function(modulePath) {
+        return fs.readFile(modulePath).then(data =>
+            readCache(hash(data))
+                .then(cachedData =>
+                    app.ports.restore.send({
+                        fileName: modulePath,
+                        package: null,
+                        data: cachedData
+                    })
+                )
+                .catch(() =>
+                    app.ports.toElm.send({
+                        fileName: modulePath,
+                        content: data.toString(),
+                        package: null
+                    })
+                )
+        );
+    };
 }
 
 function readCache(hash) {
@@ -209,7 +250,7 @@ function findElmFiles(sourceDirectory) {
     });
 }
 
-function parsePackageModule(pkg) {
+function parsePackageModule(app, pkg) {
     var pkgName = packageToName(pkg);
     var pkgPath = basePath(pkg);
 
@@ -246,6 +287,38 @@ function modulePath(name) {
     return name.split(".").join("/") + ".elm";
 }
 
+function resolvePackageVersion(packageName) {
+    var parts = packageName.split("/");
+    if (parts.length == 2) {
+        return findLatestVersion(parts[0], parts[1]).then(version => ({
+            author: parts[0],
+            name: parts[1],
+            version
+        }));
+    } else {
+        return Promise.reject("Invalid dependency name: " + packageName);
+    }
+}
+
+function findLatestVersion(author, name) {
+    return Promise.resolve(path.join(packagesRoot(), author, name))
+        .then(fs.readdir)
+        .then(data => data.filter(v => !(v == "." || v == "..")))
+        .then(versions => semverSort.asc(versions))
+        .then(versions => {
+            if (versions.length >= 1) {
+                return versions.pop();
+            } else {
+                return Promise.reject(
+                    "Found no candidate versions for package" +
+                        author +
+                        "/" +
+                        name
+                );
+            }
+        });
+}
+
 function parsePackageName(package) {
     var name = package[0];
     var parts = name.split("/");
@@ -280,21 +353,19 @@ function findExposedModules(pkg) {
     var elmJson = path.join(basePath(pkg), "elm.json");
     return fs.readFile(elmJson).then(data => {
         var info = JSON.parse(data);
-        var modules;
-
-        if (Array.isArray(info["exposed-modules"])) {
-            modules = info["exposed-modules"];
-        } else {
-            modules = Object.values(info["exposed-modules"]).reduce(
-                (acc, ms) => acc.concat(ms),
-                []
-            );
-        }
-
-        return Object.assign({}, pkg, {
-            modules: modules
-        });
+        return Object.assign({}, pkg, { modules: extractExposedModules(info) });
     });
+}
+
+function extractExposedModules(pkgInfo) {
+    if (Array.isArray(pkgInfo["exposed-modules"])) {
+        return pkgInfo["exposed-modules"];
+    } else {
+        return Object.values(pkgInfo["exposed-modules"]).reduce(
+            (acc, ms) => acc.concat(ms),
+            []
+        );
+    }
 }
 
 function packageToName(package) {

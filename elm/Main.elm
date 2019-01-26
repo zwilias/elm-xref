@@ -42,8 +42,8 @@ type alias PackageIdentifier =
 
 
 type Module
-    = Package PackageData
-    | Own ModuleData
+    = External PackageData
+    | Internal ModuleData
 
 
 type alias PackageData =
@@ -86,10 +86,10 @@ findOwnFunctions :
     -> Dict Function ( String, Location )
 findOwnFunctions name modul acc =
     case modul of
-        Package _ ->
+        External _ ->
             acc
 
-        Own m ->
+        Internal m ->
             m.declarations
                 |> List.concatMap (Node.value >> Util.resolveNodes)
                 |> List.foldl
@@ -102,11 +102,11 @@ findOwnFunctions name modul acc =
 add : Module -> Model -> Model
 add mod model =
     case mod of
-        Package package ->
+        External package ->
             { model | done = Dict.insert package.name mod model.done }
                 |> checkTodo (Set.singleton package.name)
 
-        Own modul ->
+        Internal modul ->
             { model | todo = todoItem modul model :: model.todo }
                 |> findEntryPoints modul
                 |> checkTodo Set.empty
@@ -121,6 +121,30 @@ todoItem modul model =
 
 findEntryPoints : ModuleData -> Model -> Model
 findEntryPoints modul model =
+    case model.mode of
+        Application ->
+            findApplicationEntryPoints modul model
+
+        Package exposedModules ->
+            findPackageEntryPoints exposedModules modul model
+
+
+findPackageEntryPoints : Set ModuleName -> ModuleData -> Model -> Model
+findPackageEntryPoints exposedModules modul model =
+    if Set.member modul.name exposedModules then
+        modul.interface
+            |> resolveInterface
+            |> List.map (\exposedValue -> ( modul.name, exposedValue ))
+            |> Set.fromList
+            |> Set.union model.entryPoints
+            |> (\ep -> { model | entryPoints = ep })
+
+    else
+        model
+
+
+findApplicationEntryPoints : ModuleData -> Model -> Model
+findApplicationEntryPoints modul model =
     case Interface.exposesFunction "main" modul.interface of
         True ->
             { model
@@ -160,7 +184,7 @@ checkTodo nowDone model =
                 model.todo
 
         newDone =
-            List.map (\m -> ( m.name, Own m )) newlyDone |> Dict.fromList
+            List.map (\m -> ( m.name, Internal m )) newlyDone |> Dict.fromList
 
         newModel =
             { model | todo = newTodo, done = Dict.union model.done newDone }
@@ -196,10 +220,10 @@ finalize m modul =
 interface : Module -> Interface
 interface mod =
     case mod of
-        Package p ->
+        External p ->
             p.interface
 
-        Own m ->
+        Internal m ->
             m.interface
 
 
@@ -358,15 +382,15 @@ toModule : Maybe PackageIdentifier -> String -> RawFile -> Module
 toModule package fileName rawFile =
     case package of
         Just packageInfo ->
-            toPackageModule packageInfo fileName rawFile
+            toExternalModule packageInfo fileName rawFile
 
         Nothing ->
             toInternalModule fileName rawFile
 
 
-toPackageModule : PackageIdentifier -> String -> RawFile -> Module
-toPackageModule package fileName rawFile =
-    Package
+toExternalModule : PackageIdentifier -> String -> RawFile -> Module
+toExternalModule package fileName rawFile =
+    External
         { name = RawFile.moduleName rawFile
         , fileName = fileName
         , interface = Interface.build rawFile
@@ -380,7 +404,7 @@ toInternalModule fileName rawFile =
         file =
             Processing.process Processing.init rawFile
     in
-    Own
+    Internal
         { name = RawFile.moduleName rawFile
         , fileName = fileName
         , interface = Interface.build rawFile
@@ -435,7 +459,13 @@ type alias Model =
     , done : Dict ModuleName Module
     , entryPoints : Set Function
     , callGraph : CallGraph
+    , mode : Mode
     }
+
+
+type Mode
+    = Application
+    | Package (Set ModuleName)
 
 
 type Msg
@@ -445,15 +475,28 @@ type Msg
     | Check Function
 
 
-init : ( Model, Cmd msg )
-init =
+init : List String -> ( Model, Cmd msg )
+init args =
     ( { todo = []
       , done = Dict.empty
       , entryPoints = Set.empty
       , callGraph = Dict.empty
+      , mode = modeFromArgs args
       }
     , Cmd.none
     )
+
+
+modeFromArgs : List String -> Mode
+modeFromArgs args =
+    if List.isEmpty args then
+        Application
+
+    else
+        args
+            |> List.map (String.split ".")
+            |> Set.fromList
+            |> Package
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -507,14 +550,10 @@ subscriptions =
         ]
 
 
-main : Program () Model Msg
+main : Program (List String) Model Msg
 main =
     Platform.worker
-        { init = always init
+        { init = init
         , update = update
         , subscriptions = always subscriptions
         }
-
-
-
--- Static helperdata
