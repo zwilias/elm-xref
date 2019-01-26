@@ -12,7 +12,7 @@ npm i -g elm-xref
 ## Usage
 
 To index a project and find unused functions, execute `elm-xref` in the same
-directory as your `elm-package.json`.
+directory as your `elm.json`. This works for both `application` as well as `package` projects.
 
 To find usages of a function, specify the fully qualified function name as an
 argument.
@@ -72,16 +72,9 @@ to `False`) do very much count as usage.
 
 ## Roadmap
 
-- [x] Show unused functions
-- [x] Find usages
-- [x] Support union type constructors
-- [x] Show more detail about usages (line/context)
-- [ ] Support packages (count exposed declarations from exposed modules as used)
-- [ ] Support whitelisting
+- [ ] Support whitelisting (f.e. with phantom types or internal modules with consistent API)
 - [ ] Show unused parameters
 - [ ] Support type aliases (as function and in type signatures)
-- [x] Show file/line(/col?) links for usages and definitions
-
 
 ## License
 
