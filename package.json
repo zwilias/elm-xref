@@ -1,6 +1,6 @@
 {
     "name": "elm-xref",
-    "version": "0.3.3",
+    "version": "4.0.0-beta1",
     "description":
         "Cross referencing tool for Elm - find usages and unused code",
     "author": "Ilias Van Peer",
