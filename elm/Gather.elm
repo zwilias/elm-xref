@@ -1,6 +1,6 @@
 module Gather exposing (DeclDict, Scope, calls, defaultImports)
 
-import CallGraph exposing (Usage)
+import CallGraph exposing (Function, Usage)
 import Elm.Syntax.Declaration as Declaration exposing (Declaration)
 import Elm.Syntax.Expression as Expression exposing (Expression)
 import Elm.Syntax.ModuleName exposing (ModuleName)
@@ -21,6 +21,7 @@ type alias Scope =
     { modul : ModuleName
     , function : String
     , extra : List (List String)
+    , ignored : List Function
     , available : List DeclDict
     }
 
@@ -68,6 +69,7 @@ gatherDeclarationCalls name scope decl acc =
                 , function = Node.value declarationValue.name
                 , extra = [ List.concatMap Util.patternToNames declarationValue.arguments ]
                 , available = scope
+                , ignored = []
                 }
                 declarationValue.expression
                 acc
@@ -180,10 +182,14 @@ register line f scope acc =
     else
         case find (exposed f) scope.available of
             Just decl ->
-                { caller = caller
-                , callee = { modul = decl.name, fun = f }
-                }
-                    :: acc
+                if List.member ( decl.name, f ) scope.ignored then
+                    acc
+
+                else
+                    { caller = caller
+                    , callee = { modul = decl.name, fun = f }
+                    }
+                        :: acc
 
             Nothing ->
                 acc
@@ -212,17 +218,21 @@ registerQualified : Int -> ModuleName -> String -> Scope -> List Usage -> List U
 registerQualified line qualifier f scope acc =
     case find (qualified qualifier f) scope.available of
         Just decl ->
-            { caller =
-                { modul = scope.modul
-                , fun = scope.function
-                , line = line
+            if List.member ( decl.name, f ) scope.ignored then
+                acc
+
+            else
+                { caller =
+                    { modul = scope.modul
+                    , fun = scope.function
+                    , line = line
+                    }
+                , callee =
+                    { modul = decl.name
+                    , fun = f
+                    }
                 }
-            , callee =
-                { modul = decl.name
-                , fun = f
-                }
-            }
-                :: acc
+                    :: acc
 
         Nothing ->
             acc
@@ -235,7 +245,35 @@ qualified qualifier f dict =
 
 gatherCase : Scope -> ( Node Pattern, Node Expression ) -> List Usage -> List Usage
 gatherCase scope ( pat, exp ) acc =
-    gatherExpression { scope | extra = Util.patternToNames pat :: scope.extra } exp acc
+    gatherExpression
+        { scope
+            | extra = Util.patternToNames pat :: scope.extra
+            , ignored = addPatternConstructors scope pat scope.ignored
+        }
+        exp
+        acc
+
+
+addPatternConstructors : Scope -> Node Pattern -> List Function -> List Function
+addPatternConstructors scope pat acc =
+    List.foldl (addIgnoredConstructor scope) acc (Util.patternToFunctions pat)
+
+
+addIgnoredConstructor : Scope -> Function -> List Function -> List Function
+addIgnoredConstructor scope (( mod, name ) as fn) acc =
+    let
+        predicate : DeclDict -> Bool
+        predicate =
+            case mod of
+                [] ->
+                    exposed name
+
+                _ ->
+                    qualified mod name
+    in
+    find predicate scope.available
+        |> Maybe.map (\decl -> ( decl.name, name ) :: acc)
+        |> Maybe.withDefault acc
 
 
 gatherLetDeclaration : Scope -> Node Expression.LetDeclaration -> List Usage -> List Usage

@@ -1,13 +1,13 @@
 {
     "name": "elm-xref",
     "version": "0.3.3",
-    "description": "Cross referencing tool for Elm - find usages and unused code",
-    "main": "index.js",
+    "description":
+        "Cross referencing tool for Elm - find usages and unused code",
     "author": "Ilias Van Peer",
     "license": "BSD-3-Clause",
     "repository": "zwilias/elm-xref",
     "bin": {
-        "elm-xref": "index.js"
+        "elm-xref": "bin/elm-xref"
     },
     "dependencies": {
         "bluebird": "^3.5.1",
@@ -19,14 +19,13 @@
     },
     "devDependencies": {
         "elm": "^0.19.0-bugfix6",
-        "elm-format": "^0.8.1"
+        "elm-format": "^0.8.1",
+        "tap": "^12.5.1"
     },
     "scripts": {
-        "elm": "elm make --optimize elm/Main.elm --output elm.js",
-        "prepublishOnly": "npm run elm"
+        "elm": "elm make --optimize elm/Main.elm --output lib/elm.js",
+        "prepublishOnly": "npm run elm",
+        "test": "tap tests/*.js"
     },
-    "files": [
-        "index.js",
-        "elm.js"
-    ]
+    "files": ["bin", "lib"]
 }

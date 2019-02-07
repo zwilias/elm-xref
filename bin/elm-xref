@@ -1,0 +1,121 @@
+#!/usr/bin/env node
+
+var minimist = require("minimist"),
+    runner = require("../lib/runner.js");
+
+var args = minimist(process.argv.slice(2), {
+    string: ["format"],
+    boolean: ["help"]
+});
+
+if (args.help) {
+    showUsage();
+} else if (args._.length == 1) {
+    runner
+        .parseProject()
+        .then(app => runner.findUsages(app, args._[0]))
+        .then(printUsages)
+        .catch(console.error);
+} else {
+    runner
+        .parseProject()
+        .then(runner.findUnused)
+        .then(printUnused)
+        .catch(console.error);
+}
+
+function showUsage() {
+    console.log("Usage:");
+    console.log("");
+    console.log("    elm-xref [OPTIONS]");
+    console.log("        Find unused functions");
+    console.log("");
+    console.log("    elm-xref [OPTIONS] Some.Module.function");
+    console.log(
+        "        Find where a function (or custom type constructor) is used"
+    );
+    console.log("");
+    console.log("Valid options:");
+    console.log(
+        "    --format=text|json  Use a specific format for output. Default: text"
+    );
+    console.log("");
+}
+
+function printUnused(unusedItems) {
+    if (args.format == "json") {
+        printUnusedJson(unusedItems);
+    } else {
+        printUnusedText(unusedItems);
+    }
+}
+
+function printUnusedText(unusedItems) {
+    if (unusedItems.length == 0) {
+        console.log("No unused functions or custom type constructors found!");
+        process.exit(0);
+    } else {
+        unusedItems.map(unused =>
+            console.log(
+                " - " +
+                    unused[1][0] +
+                    ":" +
+                    unused[1][1].row +
+                    ":" +
+                    unused[1][1].column +
+                    "\t" +
+                    unused[0][0].join(".") +
+                    "." +
+                    unused[0][1]
+            )
+        );
+        process.exit(1);
+    }
+}
+
+function printUnusedJson(unusedItems) {
+    var items = unusedItems.map(unused => ({
+        file: unused[1][0],
+        row: unused[1][1].row,
+        column: unused[1][1].column,
+        module: unused[0][0].join("."),
+        symbol: unused[0][1]
+    }));
+
+    console.log(JSON.stringify(items, null, 2));
+    process.exit(items.length == 0 ? 0 : 1);
+}
+
+function printUsages(usages) {
+    if (args.format == "json") {
+        printUsagesJson(usages);
+    } else {
+        printUsagesText(usages);
+    }
+}
+
+function printUsagesText(usages) {
+    console.log("Usages:");
+    usages.map(usage =>
+        console.log(
+            " - " +
+                usage[0][0].join(".") +
+                "." +
+                usage[0][1] +
+                " (" +
+                usage[1].join(", ") +
+                ")"
+        )
+    );
+}
+
+function printUsagesJson(usages) {
+    var items = usages.map(usage => ({
+        module: usage[0][0].join("."),
+        function: usage[0][1],
+        lines: usage[1]
+    }));
+
+    console.log(JSON.stringify(items, null, 2));
+    process.exit(0);
+}
