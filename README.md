@@ -1,4 +1,4 @@
-# elm-xref [![Build Status](https://travis-ci.org/zwilias/elm-xref.svg?branch=master)](https://travis-ci.org/zwilias/elm-xref) [![Build status](https://ci.appveyor.com/api/projects/status/sn9y34ekh028q8vy?svg=true)](https://ci.appveyor.com/project/zwilias/elm-xref)
+# elm-xref [![Build Status](https://travis-ci.com/zwilias/elm-xref.svg?branch=master)](https://travis-ci.com/zwilias/elm-xref) [![Build status](https://ci.appveyor.com/api/projects/status/sn9y34ekh028q8vy?svg=true)](https://ci.appveyor.com/project/zwilias/elm-xref)
 
 > Cross-referencing tools for Elm. Find unused code, and figure out where
 > specific functions are used.
