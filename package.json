@@ -1,8 +1,7 @@
 {
     "name": "elm-xref",
-    "version": "4.0.0-beta1",
-    "description":
-        "Cross referencing tool for Elm - find usages and unused code",
+    "version": "4.0.0-beta2",
+    "description": "Cross referencing tool for Elm - find usages and unused code",
     "author": "Ilias Van Peer",
     "license": "BSD-3-Clause",
     "repository": "zwilias/elm-xref",
@@ -18,6 +17,7 @@
         "through2": "^2.0.3"
     },
     "devDependencies": {
+        "prettier": "^1.16.4",
         "elm": "^0.19.0-bugfix6",
         "elm-format": "^0.8.1",
         "tap": "^12.5.1"
@@ -25,7 +25,15 @@
     "scripts": {
         "elm": "elm make --optimize elm/Main.elm --output lib/elm.js",
         "prepublishOnly": "npm run elm",
-        "test": "tap tests/*.js"
+        "prettier:write": "prettier --write bin/elm-xref \"lib/**.js\" \"tests/**.js\" package.json",
+        "prettier:check": "prettier --check bin/elm-xref \"lib/**.js\" \"tests/**.js\" package.json",
+        "test": "elm-format --validate elm && npm run prettier:check && tap tests/*.js"
     },
-    "files": ["bin", "lib"]
+    "files": [
+        "bin",
+        "lib"
+    ],
+    "prettier": {
+        "tabWidth": 4
+    }
 }
