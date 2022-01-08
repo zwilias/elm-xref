@@ -15,14 +15,14 @@
         "klaw": "^2.1.1",
         "minimist": "^1.2.0",
         "semver": "^6.3.0",
-        "semver-sort": "0.0.4",
+        "semver-sort": "^1.0.0",
         "through2": "^2.0.3"
     },
     "devDependencies": {
-        "prettier": "^1.16.4",
         "elm": "latest-0.19.1",
-        "elm-format": "^0.8.1",
-        "tap": "^12.5.1"
+        "elm-format": "^0.8.5",
+        "prettier": "^1.16.4",
+        "tap": "^15.1.6"
     },
     "scripts": {
         "elm": "elm make --optimize elm/Main.elm --output lib/elm.js",
@@ -37,5 +37,8 @@
     ],
     "prettier": {
         "tabWidth": 4
+    },
+    "tap": {
+        "check-coverage": false
     }
 }

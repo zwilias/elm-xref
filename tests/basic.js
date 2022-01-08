@@ -86,7 +86,10 @@ function initParser() {
     var app = runner.initElm();
 
     return runner
-        .parseAppPackage("0.19.1", app)(["elm/core", "1.0.3"])
+        .parseAppPackage(
+            "0.19.1",
+            app
+        )(["elm/core", "1.0.3"])
         .then(() => app);
 }
 
